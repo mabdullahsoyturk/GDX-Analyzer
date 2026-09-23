@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { GdxSymbol, parseUelTable } from './parse';
 import { GdxFileInfo, GdxService, describeTools, errorMessage } from './service';
-import { TableView, symbolTable } from './table';
+import { TableView, cachedView, columnTable } from './table';
 import { CopyRequest, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, defaultFormat, pageSize, squeezeDefaults } from './tableHost';
 import { ExportItem, ExportOptions, SymbolViewState, buildSheets, connectInstructions } from './export';
 import { ViewStateStore } from './viewState';
@@ -182,17 +182,19 @@ class ViewerSession implements vscode.Disposable {
   }
 
   private view(name: string): Promise<TableView> {
-    let view = this.views.get(name);
-    if (!view) {
-      const symbol = this.symbol(name);
-      if (!symbol) {
-        return Promise.reject(new Error(`Unknown symbol ${name}`));
-      }
-      view = this.service.loadSymbol(this.uri.fsPath, symbol).then((data) => new TableView(symbolTable(data, symbol)));
-      view.catch(() => this.views.delete(name));
-      this.views.set(name, view);
+    const symbol = this.symbol(name);
+    if (!symbol) {
+      return Promise.reject(new Error(`Unknown symbol ${name}`));
     }
-    return view;
+    // Only the most recently used symbols stay in memory.
+    return cachedView(this.views, name, () => {
+      // Streamed into compact columns, so that symbols with millions of records fit into memory.
+      const view = this.service
+        .loadSymbolColumns(this.uri.fsPath, symbol)
+        .then((data) => new TableView(columnTable(data.columns, data.keyCount, data.store, symbol)));
+      view.catch(() => this.views.delete(name));
+      return view;
+    });
   }
 
   /** The view of a symbol with its labels in GDX order. */

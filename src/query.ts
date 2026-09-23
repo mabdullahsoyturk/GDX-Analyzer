@@ -139,6 +139,9 @@ export interface CopyRequest {
   labels: boolean;
 }
 
+/** Most cells copied at once (larger selections: use the Excel export or filter the records). */
+export const MAX_COPY_CELLS = 5_000_000;
+
 /** The text for a copy request, with exact values. */
 export function copyText(
   view: TableView,
@@ -150,6 +153,12 @@ export function copyText(
   // Rows are matched against the displayed values (as in the view); the copied values are exact.
   const squeeze = squeezeInfo(view, req.query, squeezeDefaults).active;
   const q = { ...req.query, ...rowSelection(req.query), format: effectiveFormat(req.query, defaultFormat), squeeze };
-  const opts = { separator: req.separator === 'comma' ? (',' as const) : ('\t' as const), labels: req.labels, decimalSeparator };
+  const opts = {
+    separator: req.separator === 'comma' ? (',' as const) : ('\t' as const),
+    labels: req.labels,
+    decimalSeparator,
+    // The clipboard text of larger selections would need too much memory.
+    limits: { maxCells: MAX_COPY_CELLS, what: 'The selection to copy' },
+  };
   return isPivot(view, req.query) ? view.copyPivot(q, req.selection, opts) : view.copyList({ ...q, pageSize: 1 }, req.selection, opts);
 }

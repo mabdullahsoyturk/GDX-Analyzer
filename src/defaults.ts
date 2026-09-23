@@ -41,12 +41,20 @@ export function sameValue(a: string, b: string): boolean {
   return a !== '' && b !== '' && Number.isFinite(x) && Number.isFinite(y) && x === y;
 }
 
+/** Records as rows of strings, or an accessor of their cells (e.g. compact columns). */
+export type Records = string[][] | { length: number; get(row: number, col: number): string };
+
+function accessor(rows: Records): { length: number; get(row: number, col: number): string } {
+  return Array.isArray(rows) ? { length: rows.length, get: (r, c) => rows[r][c] ?? '' } : rows;
+}
+
 /** The type of an equation if all records agree: =E= (lower = upper), =N=, =L= (no lower bound) or =G=. */
-export function inferEquationType(rows: string[][], lower: number, upper: number): EquationType | undefined {
+export function inferEquationType(records: Records, lower: number, upper: number): EquationType | undefined {
   let type: EquationType | undefined;
-  for (const row of rows) {
-    const lo = row[lower] ?? '';
-    const up = row[upper] ?? '';
+  const rows = accessor(records);
+  for (let r = 0; r < rows.length; r++) {
+    const lo = rows.get(r, lower);
+    const up = rows.get(r, upper);
     const t: EquationType | undefined =
       lo === MINF && up === INF ? 'N' : sameValue(lo, up) ? 'E' : lo === MINF ? 'L' : up === INF ? 'G' : undefined;
     if (!t || (type && t !== type)) {
@@ -61,7 +69,7 @@ export function inferEquationType(rows: string[][], lower: number, upper: number
  * Default value per column (undefined for keys, texts and fields without a known default)
  * of a variable (with its subtype) or an equation.
  */
-export function fieldDefaults(symbolType: string, subtype: string | undefined, columns: string[], rows: string[][]): (string | undefined)[] {
+export function fieldDefaults(symbolType: string, subtype: string | undefined, columns: string[], rows: Records): (string | undefined)[] {
   if (symbolType !== 'Var' && symbolType !== 'Equ') {
     return columns.map(() => undefined);
   }

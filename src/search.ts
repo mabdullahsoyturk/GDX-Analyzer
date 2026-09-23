@@ -38,3 +38,24 @@ export function compileSearch(s: TextSearch | string | undefined): RegExp | unde
 export function isSearchError(r: ReturnType<typeof compileSearch>): r is { error: string } {
   return !!r && !(r instanceof RegExp);
 }
+
+/** Special values as displayed in value cells. */
+const SPECIAL_TEXTS = ['Eps', 'NA', '+Inf', '-Inf', 'Undf'];
+
+/**
+ * False if the search cannot match any number or special value as displayed, so that
+ * value columns need not be formatted and tested (e.g. a search for a label). Regular
+ * expressions are always tested.
+ */
+export function canMatchNumbers(search: TextSearch | string | undefined): boolean {
+  const s = typeof search === 'string' ? { text: search } : search;
+  if (!s || s.regex) {
+    return true;
+  }
+  const rx = compileSearch(s);
+  if (!(rx instanceof RegExp) || SPECIAL_TEXTS.some((v) => rx.test(v))) {
+    return true;
+  }
+  // Every character but the wildcards must occur in a match; numbers consist of these.
+  return /^[0-9.+\-eE]*$/.test(s.text.replace(/[*?]/g, ''));
+}

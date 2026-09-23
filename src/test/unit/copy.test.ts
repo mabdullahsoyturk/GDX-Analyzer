@@ -73,3 +73,13 @@ describe('copyPivot', () => {
     assert.deepEqual(lines, ['j,new-york,chicago,"x""y"', 'i,Level,Level,Level', 'seattle,50,300.5,', 'san-diego,275,,', '"a,b",,,1e-12']);
   });
 });
+
+describe('limits', () => {
+  it('refuses grids beyond their limits before building them', async () => {
+    const { GridTooLargeError } = await import('../../table');
+    const v = variable();
+    assert.throws(() => v.copyList({ pageSize: 1 }, { all: true }, { ...tab, limits: { maxCells: 10, what: 'Copying' } }), (e: Error) => e instanceof GridTooLargeError && /Copying has 20 cells; at most 10/.test(e.message));
+    assert.throws(() => v.gridPivot({}, { all: true }, true, { maxCols: 3 }), /columns; at most 3/);
+    assert.equal(v.copyList({ pageSize: 1 }, { rows: [0, 0], cols: [0, 0] }, { ...tab, limits: { maxCells: 1 } }).cells, 1);
+  });
+});

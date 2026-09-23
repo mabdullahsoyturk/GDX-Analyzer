@@ -72,9 +72,9 @@ describe('diffTable', () => {
       t.columns.map((c) => c.name),
       ['i', 'Status', 'Level (file 1)', 'Level (file 2)', 'Δ Level'],
     );
-    assert.deepEqual(t.rows[0].cells, ['seattle', 'changed', '50', '60', '10']);
-    assert.deepEqual(t.rows[0].marks, [2, 3]);
-    assert.deepEqual(t.rows[1].cells, ['topeka', 'only in file 2', '', '5', '']);
-    assert.equal(t.rows[1].cls, 'st-only2');
+    assert.deepEqual(t.rows![0].cells, ['seattle', 'changed', '50', '60', '10']);
+    assert.deepEqual(t.rows![0].marks, [2, 3]);
+    assert.deepEqual(t.rows![1].cells, ['topeka', 'only in file 2', '', '5', '']);
+    assert.equal(t.rows![1].cls, 'st-only2');
   });
 });

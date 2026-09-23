@@ -2,9 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { dumpUri } from './dump';
-import { DiffSummary, GdxSymbol, parseDiffOutput, parseDomainInfo, parseSymbols, pivotDiff } from './parse';
+import { DiffSummary, GdxSymbol, parseDiffOutput, parseDomainInfo, parseSymbols } from './parse';
 import { GdxService, describeTools, errorMessage } from './service';
-import { TableView, diffTable } from './table';
+import { TableView, cachedView, diffColumnTable } from './table';
 import { CopyRequest, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize } from './tableHost';
 import { DiffOptions } from './tools';
 import { PROTOCOL, webviewHtml } from './webview';
@@ -201,22 +201,24 @@ export class DiffPanel implements vscode.Disposable {
   }
 
   private view(name: string): Promise<TableView> {
-    let view = this.views.get(name);
-    if (!view) {
-      const diffSymbol = this.diffSymbols.find((s) => s.name === name);
-      if (!diffSymbol) {
-        return Promise.reject(new Error(`gdxdiff wrote no records for ${name}.`));
-      }
+    const diffSymbol = this.diffSymbols.find((s) => s.name === name);
+    if (!diffSymbol) {
+      return Promise.reject(new Error(`gdxdiff wrote no records for ${name}.`));
+    }
+    // Only the most recently used symbols stay in memory.
+    return cachedView(this.views, name, () => {
       // Use the domain names of the compared files for the key columns.
       const original = this.symbols1.find((s) => s.name.toLowerCase() === name.toLowerCase());
-      view = this.domainOf(name, original?.dim ?? diffSymbol.dim - 1)
+      const view = this.domainOf(name, original?.dim ?? diffSymbol.dim - 1)
         // DiffOnly adds the field as a dimension before the dif1/dif2/ins1/ins2 label.
-        .then((domain) => this.service.loadSymbol(this.diffFile, { ...diffSymbol, domain: [...domain, ...(diffSymbol.dim - domain.length === 2 ? ['Field'] : []), '*'] }))
-        .then((data) => new TableView(diffTable(pivotDiff(data))));
+        .then((domain) =>
+          // Streamed into compact columns: a comparison may have millions of differences.
+          this.service.loadSymbolColumns(this.diffFile, { ...diffSymbol, domain: [...domain, ...(diffSymbol.dim - domain.length === 2 ? ['Field'] : []), '*'] }),
+        )
+        .then((data) => new TableView(diffColumnTable(data)));
       view.catch(() => this.views.delete(name));
-      this.views.set(name, view);
-    }
-    return view;
+      return view;
+    });
   }
 
   private domainCache?: Promise<Map<string, string[]>>;

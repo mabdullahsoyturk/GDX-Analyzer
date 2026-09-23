@@ -1,6 +1,7 @@
 /**
  * Parsers for the textual output of gdxdump and gdxdiff.
  */
+import { ColumnStore, ColumnStoreBuilder, CsvStream } from './columns';
 import { decodeHexBytes } from './format';
 
 export type SymbolType = 'Set' | 'Par' | 'Var' | 'Equ' | 'Alias';
@@ -236,18 +237,7 @@ const FIELD_LABELS: Record<string, string> = {
 export function parseSymbolCsv(text: string, symbol: Pick<GdxSymbol, 'dim' | 'type' | 'domain'>): SymbolData {
   const [header = [], ...rows] = parseCsv(text);
   const keyCount = symbol.dim;
-  const isVarOrEqu = symbol.type === 'Var' || symbol.type === 'Equ';
-  const columns = header.map((h, idx) => {
-    if (idx < keyCount) {
-      // gdxdump writes "Dim1", "Dim2", ... for universe domains.
-      const d = symbol.domain[idx];
-      return d && d !== '*' ? d : h;
-    }
-    if (isVarOrEqu && h === 'Val') {
-      return 'Level';
-    }
-    return FIELD_LABELS[h] ?? h;
-  });
+  const columns = columnNames(header, symbol);
   const valueColumns = header.flatMap((h, idx) => (idx >= keyCount && h !== 'Text' ? [idx] : []));
   for (const row of rows) {
     for (const idx of valueColumns) {
@@ -257,6 +247,70 @@ export function parseSymbolCsv(text: string, symbol: Pick<GdxSymbol, 'dim' | 'ty
     }
   }
   return { columns, keyCount, rows };
+}
+
+/** Display names of the CSV columns written by gdxdump for a symbol. */
+export function columnNames(header: string[], symbol: Pick<GdxSymbol, 'dim' | 'type' | 'domain'>): string[] {
+  const isVarOrEqu = symbol.type === 'Var' || symbol.type === 'Equ';
+  return header.map((h, idx) => {
+    if (idx < symbol.dim) {
+      // gdxdump writes "Dim1", "Dim2", ... for universe domains.
+      const d = symbol.domain[idx];
+      return d && d !== '*' ? d : h;
+    }
+    if (isVarOrEqu && h === 'Val') {
+      return 'Level';
+    }
+    return FIELD_LABELS[h] ?? h;
+  });
+}
+
+export interface SymbolColumns {
+  columns: string[];
+  keyCount: number;
+  store: ColumnStore;
+}
+
+/**
+ * A parser for `gdxdump <file> Symb=<s> Format=csv CSVAllFields CSVSetText dFormat=hexBytes`
+ * that stores the records in compact columns as the output arrives: feed it with push()
+ * and call finish() at the end. `records` (from the symbol list) sizes the storage.
+ */
+export function parseSymbolStream(symbol: Pick<GdxSymbol, 'dim' | 'type' | 'domain' | 'records'>) {
+  let header: string[] | undefined;
+  let headerRow: string[] = [];
+  let builder: ColumnStoreBuilder | undefined;
+  const csv = new CsvStream(
+    (col, value) => {
+      if (builder) {
+        builder.set(col, value);
+      } else {
+        headerRow[col] = value;
+      }
+    },
+    () => {
+      if (builder) {
+        builder.endRow();
+      } else {
+        header = headerRow;
+        headerRow = [];
+        // Keys and set texts are labels, all other columns numbers.
+        builder = new ColumnStoreBuilder(
+          header.map((h, i) => (i < symbol.dim || h === 'Text' ? 'label' : 'number')),
+          symbol.records,
+        );
+      }
+    },
+  );
+  return {
+    push: (chunk: string) => csv.push(chunk),
+    finish(): SymbolColumns {
+      csv.end();
+      const h = header ?? [];
+      const store = (builder ?? new ColumnStoreBuilder(h.map(() => 'label'), 0)).build();
+      return { columns: columnNames(h, symbol), keyCount: symbol.dim, store };
+    },
+  };
 }
 
 export interface DiffSummaryEntry {

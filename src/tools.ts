@@ -5,6 +5,7 @@
  * This module deliberately has no dependency on `vscode` so it can be unit tested.
  */
 import { spawn } from 'child_process';
+import { StringDecoder } from 'string_decoder';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -317,7 +318,15 @@ export interface RunOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   cwd?: string;
+  /**
+   * Receives the output as it arrives (decoded as UTF-8) instead of it being collected;
+   * RunResult.stdout then only holds the first few kilobytes (for error messages).
+   */
+  onStdout?: (chunk: string) => void;
 }
+
+/** Output kept for error messages when it is streamed. */
+const STREAMED_OUTPUT_KEPT = 16384;
 
 export function run(command: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
@@ -331,10 +340,43 @@ export function run(command: string, args: string[], opts: RunOptions = {}): Pro
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    child.stdout.on('data', (d: Buffer) => out.push(d));
+    let kept = 0;
+    const decoder = new StringDecoder('utf8');
+    const stream = opts.onStdout;
+    let streamError: unknown;
+    child.stdout.on('data', (d: Buffer) => {
+      if (!stream) {
+        out.push(d);
+        return;
+      }
+      if (kept < STREAMED_OUTPUT_KEPT) {
+        out.push(d.subarray(0, STREAMED_OUTPUT_KEPT - kept));
+        kept += d.length;
+      }
+      if (streamError === undefined) {
+        try {
+          stream(decoder.write(d));
+        } catch (e) {
+          // Stop the tool if the consumer fails (e.g. out of memory for the data).
+          streamError = e;
+          child.kill();
+        }
+      }
+    });
     child.stderr.on('data', (d: Buffer) => err.push(d));
     child.on('error', reject);
     child.on('close', (code, sig) => {
+      if (stream && streamError === undefined) {
+        try {
+          stream(decoder.end());
+        } catch (e) {
+          streamError = e;
+        }
+      }
+      if (streamError !== undefined) {
+        reject(streamError);
+        return;
+      }
       const result = {
         exitCode: code ?? -1,
         stdout: Buffer.concat(out).toString('utf8'),
@@ -382,6 +424,19 @@ export class GdxTools {
       throw new ToolError(message, result);
     }
     return result.stdout;
+  }
+
+  /**
+   * Runs gdxdump and hands its output to `onChunk` as it arrives, without holding all
+   * of it in memory (for symbols with many records).
+   */
+  async dumpStream(file: string, options: DumpOptions, onChunk: (chunk: string) => void, opts?: RunOptions): Promise<void> {
+    this.checkFile(file);
+    const result = await this.exec(this.tools.gdxdump, buildDumpArgs(this.tools.backend, file, options), { ...opts, onStdout: onChunk });
+    if (result.exitCode !== 0) {
+      const message = clean(result.stdout + '\n' + result.stderr) || `gdxdump failed with exit code ${result.exitCode}`;
+      throw new ToolError(message, result);
+    }
   }
 
   /**

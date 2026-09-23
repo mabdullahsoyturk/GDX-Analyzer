@@ -7,7 +7,7 @@ import { NumberFormat, normalizeFormat } from './format';
 import type { GdxSymbol } from './parse';
 import { TextSearch } from './search';
 import { ColumnFilter, SpecialValue, TableView, specialOf } from './table';
-import { Sheet, SheetCell, sheetNames } from './xlsx';
+import { MAX_COLS, MAX_ROWS, Sheet, SheetCell, sheetNames } from './xlsx';
 
 /** The per-symbol view state of the webview (see media/table.js). */
 export interface SymbolViewState {
@@ -87,7 +87,9 @@ export function buildSheets(items: ExportItem[], options: ExportOptions, default
   return items.map((item) => {
     const q = exportQuery(item, options, defaults);
     // Like GAMS Connect: set elements without text are empty in the list layout and Y in the table layout.
-    const grid = isPivot(item) ? item.view.gridPivot(q, { all: true }, true) : item.view.gridList(q, { all: true }, false);
+    // Excel's limits are checked before the sheet is built.
+    const limits = { maxRows: MAX_ROWS, maxCols: MAX_COLS, what: item.symbol.name };
+    const grid = isPivot(item) ? item.view.gridPivot(q, { all: true }, true, limits) : item.view.gridList(q, { all: true }, false, limits);
     const rows: SheetCell[][] = grid.rows.map((row) =>
       row.map((c): SheetCell => (c.header ? { v: c.v, bold: true } : c.value ? { v: sheetValue(c.v, options.specials) } : { v: c.v })),
     );

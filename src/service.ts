@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GdxSymbol, SymbolData, mergeDomainInfo, mergeSubtypes, parseDomainInfo, parseSubtypes, parseSymbolCsv, parseSymbols, parseVersionInfo } from './parse';
+import { GdxSymbol, SymbolColumns, mergeDomainInfo, mergeSubtypes, parseDomainInfo, parseSubtypes, parseSymbolStream, parseSymbols, parseVersionInfo } from './parse';
 import { BackendSetting, GdxTools, ResolvedTools, ToolNotFoundError, resolveTools } from './tools';
 
 export interface GdxFileInfo {
@@ -62,10 +62,14 @@ export class GdxService implements vscode.Disposable {
     return { version: parseVersionInfo(versionText), symbols };
   }
 
-  async loadSymbol(file: string, symbol: GdxSymbol): Promise<SymbolData> {
-    // hexBytes: exact values instead of gdxdump's 15 significant digits.
-    const csv = await this.tools().dump(file, { symbol: symbol.name, format: 'csv', csvAllFields: true, csvSetText: true, dFormat: 'hexBytes' });
-    return parseSymbolCsv(csv, symbol);
+  /**
+   * The records of a symbol in compact columns, parsed while gdxdump writes them (so that
+   * symbols with millions of records fit into memory); hexBytes gives the exact values.
+   */
+  async loadSymbolColumns(file: string, symbol: GdxSymbol): Promise<SymbolColumns> {
+    const parser = parseSymbolStream(symbol);
+    await this.tools().dumpStream(file, { symbol: symbol.name, format: 'csv', csvAllFields: true, csvSetText: true, dFormat: 'hexBytes' }, parser.push);
+    return parser.finish();
   }
 
   /** Shows an error; offers to open the settings when the tools could not be found. */

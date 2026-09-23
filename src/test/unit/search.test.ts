@@ -146,3 +146,17 @@ describe('search rules of the webview (media/table.js)', () => {
     }
   });
 });
+
+describe('canMatchNumbers', () => {
+  it('skips value columns only for searches that cannot match a number or special value', async () => {
+    const { canMatchNumbers } = await import('../../search');
+    for (const text of ['99.5', '1e-12', '1E+20', '-3', '*5*', 'eps', 'na', 'i*f', 'nf', 'Undf', '?']) {
+      assert.equal(canMatchNumbers({ text }), true, text);
+    }
+    for (const text of ['ebikes', 'e*bikes', 'north', 'x1', 'seattle']) {
+      assert.equal(canMatchNumbers({ text }), false, text);
+    }
+    assert.equal(canMatchNumbers({ text: 'north', regex: true }), true);
+    assert.equal(canMatchNumbers({ text: 'na', exact: true }), true);
+  });
+});
