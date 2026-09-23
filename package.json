@@ -1,0 +1,318 @@
+{
+  "name": "gdx-viewer",
+  "displayName": "GDX Viewer",
+  "description": "View, dump and compare GAMS GDX files using gdxdump/gdxdiff from GAMS or the GAMSPy CLI.",
+  "version": "0.7.0",
+  "publisher": "gams",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Data Science",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "gams",
+    "gamspy",
+    "gdx",
+    "gdxdump",
+    "gdxdiff"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "gdx.viewer",
+        "displayName": "GDX Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.gdx"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "gdx.open",
+        "title": "Open in GDX Viewer",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.dump",
+        "title": "Dump to Text (gdxdump)",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.dumpSymbol",
+        "title": "Dump Symbol to Text (gdxdump)",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.exportCsv",
+        "title": "Export Symbol to CSV",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.selectForCompare",
+        "title": "Select for GDX Compare",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.compareWithSelected",
+        "title": "Compare with Selected GDX (gdxdiff)",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.compare",
+        "title": "Compare GDX Files (gdxdiff)",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.exportExcel",
+        "title": "Export to Excel…",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.resetViewState",
+        "title": "Reset Viewer State",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.showToolInfo",
+        "title": "Show Tool Information",
+        "category": "GDX"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "gdx.open",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
+          "group": "navigation@10"
+        },
+        {
+          "command": "gdx.dump",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
+          "group": "gdx@1"
+        },
+        {
+          "command": "gdx.exportExcel",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
+          "group": "gdx@2"
+        },
+        {
+          "command": "gdx.resetViewState",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
+          "group": "gdx@3"
+        },
+        {
+          "command": "gdx.selectForCompare",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder && !listMultiSelection",
+          "group": "3_compare@10"
+        },
+        {
+          "command": "gdx.compareWithSelected",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder && gdx.hasSelectionForCompare && !listMultiSelection",
+          "group": "3_compare@11"
+        },
+        {
+          "command": "gdx.compare",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder && listMultiSelection",
+          "group": "3_compare@12"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "gdx.dump",
+          "when": "activeCustomEditorId == gdx.viewer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gdx.compare",
+          "when": "activeCustomEditorId == gdx.viewer",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "gdx.selectForCompare",
+          "when": "false"
+        },
+        {
+          "command": "gdx.compareWithSelected",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GDX Viewer",
+      "properties": {
+        "gdx.backend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "gams",
+            "gamspy"
+          ],
+          "enumDescriptions": [
+            "Use the GAMS gdxdump/gdxdiff executables if a GAMS system is found, otherwise fall back to the GAMSPy CLI.",
+            "Always use gdxdump/gdxdiff from a GAMS system directory.",
+            "Always use `gamspy gdx dump` / `gamspy gdx diff`."
+          ],
+          "default": "auto",
+          "description": "Which tools to use for reading and comparing GDX files."
+        },
+        "gdx.gamsSystemDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "GAMS system directory containing gdxdump and gdxdiff. If empty, the PATH and common install locations are searched."
+        },
+        "gdx.gamspyExecutable": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Path to the gamspy executable. If empty, a .venv in the workspace folders and then the PATH are searched."
+        },
+        "gdx.maxRowsPerPage": {
+          "type": "number",
+          "default": 500,
+          "minimum": 50,
+          "description": "Number of records (list view) or rows (table view) shown per page in the GDX viewer."
+        },
+        "gdx.maxColumnsPerPage": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "description": "Number of columns shown per page in the table view of the GDX viewer."
+        },
+        "gdx.numberFormat.style": {
+          "type": "string",
+          "enum": [
+            "g",
+            "f",
+            "e"
+          ],
+          "enumDescriptions": [
+            "Automatic: fixed notation for numbers of moderate size, scientific notation otherwise; the precision is the number of significant digits.",
+            "Fixed notation; the precision is the number of decimals (0-14). Very large numbers use scientific notation.",
+            "Scientific notation; the precision is the number of significant digits."
+          ],
+          "default": "g",
+          "markdownDescription": "Default format of numbers in the GDX viewer and the comparison view. Each symbol's format can be changed with *Format* in the viewer."
+        },
+        "gdx.numberFormat.precision": {
+          "type": "integer",
+          "default": 6,
+          "minimum": 0,
+          "maximum": 17,
+          "markdownDescription": "Default precision: significant digits (1-17) for the `g` and `e` formats, decimals (0-14) for `f`."
+        },
+        "gdx.numberFormat.fullPrecision": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show the fewest digits that reproduce the stored values exactly (`g` and `e` formats), instead of `#gdx.numberFormat.precision#`."
+        },
+        "gdx.numberFormat.squeezeTrailingZeros": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remove trailing zeros after the decimal point."
+        },
+        "gdx.rememberViewState": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Remember the view of each GDX file (selected symbol and, per symbol, filters, sorting, fields, layout and number format) after it is closed. A symbol's view is kept while its type and dimension stay the same. *GDX: Reset Viewer State* forgets the view of a file."
+        },
+        "gdx.squeezeDefaults": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Hide the fields of variables and equations (level, marginal, bounds, scale) that have their default value in every record. Can be changed per symbol with *Fields*."
+        },
+        "gdx.copy.decimalSeparator": {
+          "type": "string",
+          "enum": [
+            "period",
+            "system",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "Always use a period (.)",
+            "Use the decimal separator of the system language",
+            "Use gdx.copy.customDecimalSeparator"
+          ],
+          "default": "period",
+          "description": "Decimal separator of numbers copied from the GDX viewer and the comparison view (the displayed values are not affected)."
+        },
+        "gdx.copy.customDecimalSeparator": {
+          "type": "string",
+          "default": ",",
+          "markdownDescription": "Decimal separator used when `#gdx.copy.decimalSeparator#` is `custom`."
+        },
+        "gdx.diff.eps": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Absolute tolerance used by gdxdiff (Eps). 0 uses the tool default."
+        },
+        "gdx.diff.relEps": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Relative tolerance used by gdxdiff (RelEps). 0 uses the tool default."
+        },
+        "gdx.diff.field": {
+          "type": "string",
+          "enum": [
+            "All",
+            "L",
+            "M",
+            "Lo",
+            "Up",
+            "Prior",
+            "Scale"
+          ],
+          "default": "All",
+          "description": "Variable/equation field compared by gdxdiff."
+        },
+        "gdx.diff.compareDomains": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let gdxdiff also compare the domains of symbols (CmpDomains)."
+        },
+        "gdx.diff.ignoreSetText": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let gdxdiff ignore the explanatory texts of set elements (SetDesc=N)."
+        },
+        "gdx.diff.compareDefaults": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let gdxdiff report default values (e.g. 0 for parameters) found in only one file as differences (CmpDefaults)."
+        },
+        "gdx.diff.ignoreOrder": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let gdxdiff ignore the UEL order of the input files (IgnoreOrder)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test:unit": "npm run compile && node --test \"out/test/unit/*.test.js\"",
+    "test:integration": "npm run compile && node out/test/runIntegration.js",
+    "test": "npm run test:unit",
+    "package": "vsce package --skip-license --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.9.0"
+  }
+}
