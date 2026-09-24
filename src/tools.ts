@@ -515,9 +515,11 @@ export class GdxTools {
     this.checkFile(file2);
     this.checkFile(diffFile);
     // gdxdiff writes a temporary file in its working directory and renames it to diffFile, which
-    // fails across file systems: run it where the difference file goes.
-    const result = await this.exec(this.tools.gdxdiff, buildDiffArgs(this.tools.backend, file1, file2, diffFile, options), {
-      cwd: path.dirname(path.resolve(diffFile)),
+    // fails across file systems: run it where the difference file goes (with absolute paths, so
+    // that relative ones still refer to the current directory).
+    const [a, b, d] = [file1, file2, diffFile].map((f) => path.resolve(f));
+    const result = await this.exec(this.tools.gdxdiff, buildDiffArgs(this.tools.backend, a, b, d, options), {
+      cwd: path.dirname(d),
       ...opts,
     });
     if (result.exitCode !== 0 && result.exitCode !== 1) {

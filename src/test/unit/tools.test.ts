@@ -159,6 +159,18 @@ for (const backend of ['gams', 'gamspy'] as const) {
       );
     });
 
+    it('compares files given by relative paths', async () => {
+      const cwd = process.cwd();
+      process.chdir(fixtures);
+      try {
+        const result = await tools.diff('transport1.gdx', 'transport2.gdx', path.relative(fixtures, path.join(tmp, `relative ${backend}.gdx`)));
+        assert.equal(result.exitCode, 1);
+        assert.ok(fs.existsSync(path.join(tmp, `relative ${backend}.gdx`)));
+      } finally {
+        process.chdir(cwd);
+      }
+    });
+
     it('recognizes identical files', async () => {
       const result = await tools.diff(t1, t1, path.join(tmp, `same ${backend}.gdx`));
       assert.equal(result.exitCode, 0);

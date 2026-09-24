@@ -186,18 +186,19 @@ logs every command the extension runs.
 ## Large files
 
 Records are kept in the extension host in compact columns (labels stored once, numbers as numbers), and the
-webview only receives the page it shows. Measured with gdxdump from GAMS 55 on a 160 MB GDX file:
+webview only receives the rows it shows. Measured with the bundled gdxdump (GAMS 54.4) on a 148 MB GDX file, on an
+Intel Core i7-1260P (median of three runs; memory is what a loaded and sorted symbol keeps):
 
 | Symbol | Load | Memory | Sort | Label search | Table view |
 | --- | --- | --- | --- | --- | --- |
-| 1 million records (2 dims) | 0.4 s | ~65 MB | 0.3 s | 0.04 s | 0.1 s |
-| 1 million variable records | 1.0 s | ~90 MB | 0.3 s | 0.04 s | 0.1 s |
-| 10 million records (3 dims) | 5 s | ~250 MB | 4 s | 0.3 s | 0.6 s |
+| 1 million records (2 dims) | 0.3 s | ~22 MB | 0.3 s | 0.02 s | 0.07 s |
+| 1 million variable records | 1.0 s | ~58 MB | 0.3 s | 0.04 s | 0.07 s |
+| 10 million records (3 dims) | 4.6 s | ~250 MB | 5.2 s | 0.2 s | 0.6 s |
 
-A comparison with 2 million differing records loads in about 2 seconds with about 250 MB. Searching for a
-number formats every value (about 2 seconds per million values). The viewer and each comparison keep the
-records of the four most recently used symbols. Copying is limited to 5 million cells and the Excel export to
-Excel's limits (1,048,576 rows, 16,384 columns); use filters to reduce larger symbols.
+A comparison with 2 million differing records takes about 0.8 seconds for gdxdiff and 1.9 seconds to load, and
+keeps about 220 MB. Searching for a number formats every value (about 0.6 seconds per million values). The viewer
+and each comparison keep the records of the four most recently used symbols. Copying is limited to 5 million cells
+and the Excel export to Excel's limits (1,048,576 rows, 16,384 columns); use filters to reduce larger symbols.
 
 ## Limitations
 
