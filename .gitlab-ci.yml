@@ -56,14 +56,18 @@ fetch-tools:
 .smoke-test-unix:
   stage: smoke-test
   needs: [fetch-tools]
+  # The job shell stops at the first failing command: outputs go to files (no pipes), and the
+  # exit code of gdxdiff (1: the files differ) is caught with `|| code=$?`.
   script:
     - chmod +x "tools/$TARGET/gdxdump" "tools/$TARGET/gdxdiff"
-    - tools/$TARGET/gdxdump test/fixtures/transport1.gdx Symbols | grep -q ' x '
     - work=$(mktemp -d)
+    - tools/$TARGET/gdxdump test/fixtures/transport1.gdx Symbols > "$work/symbols.txt"
+    - grep -q ' x ' "$work/symbols.txt"
     # From the output's directory: gdxdiff writes a temporary file there and renames it.
-    - (cd "$work" && "$CI_PROJECT_DIR/tools/$TARGET/gdxdiff" "$CI_PROJECT_DIR/test/fixtures/transport1.gdx" "$CI_PROJECT_DIR/test/fixtures/transport2.gdx" "$work/diff.gdx" > "$work/diff.log"; echo $? > "$work/code")
+    - code=0; (cd "$work" && "$CI_PROJECT_DIR/tools/$TARGET/gdxdiff" "$CI_PROJECT_DIR/test/fixtures/transport1.gdx" "$CI_PROJECT_DIR/test/fixtures/transport2.gdx" "$work/diff.gdx") > "$work/diff.log" || code=$?
     - cat "$work/diff.log"
-    - test "$(cat "$work/code")" = 1 && grep -q 'Data are different' "$work/diff.log"
+    - test "$code" = 1
+    - grep -q 'Data are different' "$work/diff.log"
 
 smoke-test-linux-arm64:
   extends: .smoke-test-unix
