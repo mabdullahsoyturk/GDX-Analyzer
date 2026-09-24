@@ -15,3 +15,5 @@ scripts/**
 tools/**
 dist/**
 .gitlab-ci.yml
+images/**
+CONTRIBUTING.md

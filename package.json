@@ -1,7 +1,7 @@
 {
   "name": "gdx-analyzer",
   "displayName": "GDX Analyzer",
-  "description": "View, chart, dump and compare GAMS GDX files using gdxdump/gdxdiff from GAMS or the GAMSPy CLI. Unofficial; not affiliated with GAMS.",
+  "description": "Browse, chart and compare GAMS GDX files: a fast viewer with table view, charts, gdxdiff comparisons, Excel export and MCP tools for AI agents. Independent; not affiliated with GAMS.",
   "version": "0.8.0",
   "publisher": "muhammet-soyturk",
   "author": {
