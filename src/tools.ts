@@ -11,7 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 export type Backend = 'gams' | 'gamspy';
-/** 'bundled': the tools shipped with the extension (built from the MIT-licensed GAMS-dev/gdx sources). */
+/** 'bundled': the tools shipped with the extension (taken from the gamspy_base package of GAMS). */
 export type BackendSetting = 'auto' | 'bundled' | Backend;
 
 export interface ToolSettings {
@@ -27,7 +27,7 @@ export interface ToolSettings {
 export interface ResolvedTools {
   /** The command line syntax: the bundled tools are the GAMS tools. */
   backend: Backend;
-  /** The tools bundled with the extension; `version` is their GDX release. */
+  /** The tools bundled with the extension; `version` names their release, e.g. "GAMS 54.4.0". */
   bundled?: { version: string };
   /** GAMS backend: the system directory. GAMSPy backend: the gamspy executable. */
   location: string;
@@ -255,7 +255,7 @@ function resolveBundled(settings: ToolSettings): ResolvedTools | undefined {
   }
   let version = '';
   try {
-    version = fs.readFileSync(path.join(dir, 'GDX_VERSION'), 'utf8').trim();
+    version = fs.readFileSync(path.join(dir, 'VERSION'), 'utf8').trim();
   } catch {
     // Unknown version.
   }

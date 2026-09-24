@@ -249,14 +249,14 @@ describe('bundled tools', () => {
   const fake = () => {
     const dir = fs.mkdtempSync(path.join(tmp, 'bundled '));
     for (const t of ['gdxdump', 'gdxdiff']) fs.writeFileSync(path.join(dir, exe(t)), '', { mode: 0o644 });
-    fs.writeFileSync(path.join(dir, 'GDX_VERSION'), '7.12.1\n');
+    fs.writeFileSync(path.join(dir, 'VERSION'), 'GAMS 54.4.0\n');
     return dir;
   };
 
-  it('are preferred by auto, with their GDX version, and made executable', () => {
+  it('are preferred by auto, with their version, and made executable', () => {
     const dir = fake();
     const t = resolveTools({ backend: 'auto', bundledDirectory: dir });
-    assert.deepEqual([t.backend, t.bundled, t.location, t.gdxdump], ['gams', { version: '7.12.1' }, dir, path.join(dir, exe('gdxdump'))]);
+    assert.deepEqual([t.backend, t.bundled, t.location, t.gdxdump], ['gams', { version: 'GAMS 54.4.0' }, dir, path.join(dir, exe('gdxdump'))]);
     if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, 'gdxdump')).mode & 0o111, 0o111);
   });
 

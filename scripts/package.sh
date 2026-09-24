@@ -4,7 +4,7 @@
 #
 # usage: scripts/package.sh <target> | universal
 #   <target>   a VS Code platform (linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64) whose
-#              tools are in tools/<target> (built by scripts/build-gdx-tools.sh / .ps1)
+#              tools are in tools/<target> (from scripts/fetch-gdx-tools.py)
 #
 # The packages are written to dist/.
 set -euo pipefail
@@ -23,11 +23,13 @@ args=(--skip-license --allow-missing-repository --no-dependencies)
 if [ "$target" = universal ]; then
   out="dist/$name-$version.vsix"
 else
-  if [ ! -x "tools/$target/gdxdump" ] && [ ! -f "tools/$target/gdxdump.exe" ]; then
-    echo "No tools for $target in tools/$target: build them with scripts/build-gdx-tools.sh first." >&2
+  if [ ! -f "tools/$target/gdxdump" ] && [ ! -f "tools/$target/gdxdump.exe" ]; then
+    echo "No tools for $target in tools/$target: get them with scripts/fetch-gdx-tools.py first." >&2
     exit 1
   fi
   cp -R "tools/$target" bin
+  # CI artifacts may lose the executable bit of the tools and their libraries.
+  find bin -type f ! -name '*.md' ! -name '*.dll' ! -name '*.exe' ! -name VERSION -exec chmod 755 {} +
   args+=(--target "$target")
   out="dist/$name-$version-$target.vsix"
 fi

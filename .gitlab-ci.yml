@@ -1,9 +1,9 @@
-# Builds gdxdump/gdxdiff from the MIT-licensed GDX sources (https://github.com/GAMS-dev/gdx) on each
-# platform, tests the extension with them, packages one VSIX per platform (plus a universal one
-# without tools) and publishes them on tags.
+# Takes gdxdump/gdxdiff (and the libraries they load) from the gamspy_base wheels on PyPI, smoke-tests
+# them on each platform, tests the extension with them, packages one VSIX per platform (plus a
+# universal one without tools) and publishes them on tags.
 #
 # Runner tags as in the GAMS projects: linux, linux-arm64 (Docker), macos, macos-arm64 (shell),
-# windows (Docker, Windows containers).
+# windows (shell, PowerShell).
 
 default:
   tags: [linux]
@@ -15,90 +15,95 @@ workflow:
     - when: always
 
 stages:
-  - build-tools
+  - fetch-tools
+  - smoke-test
   - test
   - package
   - publish
 
 variables:
-  GDX_VERSION:
-    value: "7.12.1"
-    description: "Release tag of GAMS-dev/gdx to build gdxdump and gdxdiff from"
+  GAMSPY_BASE_VERSION:
+    value: "54.4.0"
+    description: "Release of gamspy_base whose gdxdump and gdxdiff are bundled"
   NODE_IMAGE:
     value: node:22-bookworm
-    description: "Image for testing and packaging the extension"
-  MACHINES_CONTAINER_REG:
-    value: registry.gams.com/devel/machines
-    description: "URL to the container registry of the machines repository (Windows builder image)"
-  GIT_DEPTH: "20"
+    description: "Image for testing and packaging the extension (Node.js and Python 3)"
 
-#### BUILD THE GDX TOOLS ####
+#### FETCH THE TOOLS ####
 
-.build-tools:
-  stage: build-tools
-  needs: []
-  artifacts:
-    name: "gdx-tools-$TARGET"
+fetch-tools:
+  stage: fetch-tools
+  image: $NODE_IMAGE
+  script:
+    # All platforms from their wheels (the Linux x64 tools are smoke-tested here).
+    - python3 scripts/fetch-gdx-tools.py --version "$GAMSPY_BASE_VERSION"
+  cache:
+    key: gamspy-base-$GAMSPY_BASE_VERSION
     paths:
-      - tools/$TARGET/
+      - tools/.cache/
+  artifacts:
+    name: "gdx-tools-$GAMSPY_BASE_VERSION"
+    paths:
+      - tools/linux-x64/
+      - tools/linux-arm64/
+      - tools/darwin-x64/
+      - tools/darwin-arm64/
+      - tools/win32-x64/
     expire_in: 1 week
 
-# manylinux_2_28 (glibc 2.28, the oldest VS Code supports): the tools run on all distributions VS Code runs on.
-.build-tools-linux:
-  extends: .build-tools
+#### SMOKE-TEST THE TOOLS ON THEIR PLATFORM ####
+
+.smoke-test-unix:
+  stage: smoke-test
+  needs: [fetch-tools]
   script:
-    - git config --global --add safe.directory '*'
-    - scripts/build-gdx-tools.sh "tools/$TARGET"
+    - chmod +x "tools/$TARGET/gdxdump" "tools/$TARGET/gdxdiff"
+    - tools/$TARGET/gdxdump test/fixtures/transport1.gdx Symbols | grep -q ' x '
+    - work=$(mktemp -d)
+    # From the output's directory: gdxdiff writes a temporary file there and renames it.
+    - (cd "$work" && "$CI_PROJECT_DIR/tools/$TARGET/gdxdiff" "$CI_PROJECT_DIR/test/fixtures/transport1.gdx" "$CI_PROJECT_DIR/test/fixtures/transport2.gdx" "$work/diff.gdx" > "$work/diff.log"; echo $? > "$work/code")
+    - cat "$work/diff.log"
+    - test "$(cat "$work/code")" = 1 && grep -q 'Data are different' "$work/diff.log"
 
-build-tools-linux-x64:
-  extends: .build-tools-linux
-  tags: [linux]
-  image: quay.io/pypa/manylinux_2_28_x86_64
-  variables:
-    TARGET: linux-x64
-
-build-tools-linux-arm64:
-  extends: .build-tools-linux
+smoke-test-linux-arm64:
+  extends: .smoke-test-unix
   tags: [linux-arm64]
-  image: quay.io/pypa/manylinux_2_28_aarch64
+  image: $NODE_IMAGE
   variables:
     TARGET: linux-arm64
 
-.build-tools-macos:
-  extends: .build-tools
-  script:
-    - scripts/build-gdx-tools.sh "tools/$TARGET"
-
-build-tools-darwin-x64:
-  extends: .build-tools-macos
+smoke-test-darwin-x64:
+  extends: .smoke-test-unix
   tags: [macos]
   variables:
     TARGET: darwin-x64
 
-build-tools-darwin-arm64:
-  extends: .build-tools-macos
+smoke-test-darwin-arm64:
+  extends: .smoke-test-unix
   tags: [macos-arm64]
   variables:
     TARGET: darwin-arm64
 
-build-tools-win32-x64:
-  extends: .build-tools
+smoke-test-win32-x64:
+  stage: smoke-test
+  needs: [fetch-tools]
   tags: [windows]
-  image:
-    name: $MACHINES_CONTAINER_REG/wei/builder-full:latest
-  variables:
-    TARGET: win32-x64
   script:
-    - '& .\scripts\build-gdx-tools.ps1 "tools\$env:TARGET"'
+    - $symbols = & .\tools\win32-x64\gdxdump.exe test\fixtures\transport1.gdx Symbols
+    - if ($LASTEXITCODE -ne 0 -or -not ($symbols -match ' x ')) { $symbols; throw 'gdxdump smoke test failed' }
+    - $work = Join-Path ([System.IO.Path]::GetTempPath()) ("gdx-smoke-" + [guid]::NewGuid()); New-Item -ItemType Directory -Path $work | Out-Null
+    # From the output's directory: gdxdiff writes a temporary file there and renames it.
+    - Push-Location $work; $diff = & "$env:CI_PROJECT_DIR\tools\win32-x64\gdxdiff.exe" "$env:CI_PROJECT_DIR\test\fixtures\transport1.gdx" "$env:CI_PROJECT_DIR\test\fixtures\transport2.gdx" (Join-Path $work 'diff.gdx'); $code = $LASTEXITCODE; Pop-Location
+    - $diff
+    - if ($code -ne 1 -or -not ($diff -match 'Data are different')) { throw "gdxdiff smoke test failed (exit code $code)" }
 
 #### TEST ####
 
-# The unit tests with the bundled Linux tools (the tools of the other platforms are smoke-tested
-# when they are built).
+# The unit tests with the bundled Linux x64 tools.
 test:
   stage: test
   image: $NODE_IMAGE
-  needs: [build-tools-linux-x64]
+  needs: [fetch-tools]
   script:
     - npm ci
     - npm run compile
@@ -110,11 +115,11 @@ package:
   stage: package
   image: $NODE_IMAGE
   needs:
-    - build-tools-linux-x64
-    - build-tools-linux-arm64
-    - build-tools-darwin-x64
-    - build-tools-darwin-arm64
-    - build-tools-win32-x64
+    - fetch-tools
+    - smoke-test-linux-arm64
+    - smoke-test-darwin-x64
+    - smoke-test-darwin-arm64
+    - smoke-test-win32-x64
     - test
   script:
     - npm ci

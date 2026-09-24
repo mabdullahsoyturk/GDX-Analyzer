@@ -78,7 +78,7 @@ export class GdxService implements vscode.Disposable {
 
 export function describeTools(t: ResolvedTools): string {
   if (t.bundled) {
-    return `bundled gdxdump/gdxdiff${t.bundled.version ? ` (GDX ${t.bundled.version})` : ''}`;
+    return `bundled gdxdump/gdxdiff${t.bundled.version ? ` (${t.bundled.version})` : ''}`;
   }
   return t.backend === 'gams' ? `GAMS gdxdump/gdxdiff from ${t.location}` : `GAMSPy CLI (${t.location})`;
 }

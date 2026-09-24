@@ -179,7 +179,7 @@
           ],
           "enumDescriptions": [
             "Use the gdxdump/gdxdiff bundled with the extension if this package has them for the platform, otherwise those of a GAMS system, otherwise the GAMSPy CLI.",
-            "Always use the gdxdump/gdxdiff bundled with the extension (built from the open-source GDX library).",
+            "Always use the gdxdump/gdxdiff bundled with the extension (from the gamspy_base package of GAMS).",
             "Always use gdxdump/gdxdiff from a GAMS system directory (e.g. to use the tools of a specific GAMS version).",
             "Always use `gamspy gdx dump` / `gamspy gdx diff`."
           ],
@@ -342,7 +342,8 @@
     "test:integration": "npm run compile && node out/test/runIntegration.js",
     "test": "npm run test:unit",
     "package": "scripts/package.sh universal",
-    "package:target": "scripts/package.sh"
+    "package:target": "scripts/package.sh",
+    "fetch-tools": "python3 scripts/fetch-gdx-tools.py"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

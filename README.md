@@ -5,7 +5,7 @@
 
 View, dump and compare [GAMS](https://www.gams.com) GDX files in VS Code. The extension does not read GDX
 files itself; it runs the tools **gdxdump** and **gdxdiff**. The packages for Windows, macOS and Linux include
-them, built from the open-source [GDX API](https://github.com/GAMS-dev/gdx) (MIT license), so nothing else needs
+them, taken from the [gamspy_base](https://pypi.org/project/gamspy-base/) package of GAMS, so nothing else needs
 to be installed. The extension can also use the tools of a GAMS installation or the
 [GAMSPy](https://gamspy.readthedocs.io) CLI (`gamspy gdx dump` / `gamspy gdx diff`).
 
@@ -207,22 +207,22 @@ Excel's limits (1,048,576 rows, 16,384 columns); use filters to reduce larger sy
 
 ## Bundled tools and packaging
 
-`scripts/build-gdx-tools.sh` (Linux, macOS) and `scripts/build-gdx-tools.ps1` (Windows) build gdxdump, gdxdiff and
-the GDX library from a release of [GAMS-dev/gdx](https://github.com/GAMS-dev/gdx) (`GDX_VERSION`, default 7.12.1)
-into `tools/<platform>` and smoke-test them; `scripts/package.sh <platform>` packages the extension with those
-tools (`dist/gdx-analyzer-<version>-<platform>.vsix`), `scripts/package.sh universal` without tools. On Linux, build
-in a `manylinux_2_28` container so that the tools run with glibc 2.28 or later:
+`scripts/fetch-gdx-tools.py` extracts gdxdump, gdxdiff, the GDX library and the runtime libraries they load from
+the [gamspy_base](https://pypi.org/project/gamspy-base/) wheels (`GAMSPY_BASE_VERSION`, default 54.4.0) into
+`tools/<platform>` for all platforms, checking the wheels against the digests on PyPI, and smoke-tests the tools of
+the platform it runs on. `scripts/package.sh <platform>` packages the extension with those tools
+(`dist/gdx-analyzer-<version>-<platform>.vsix`), `scripts/package.sh universal` without them:
 
 ```sh
-docker run --rm -v "$PWD":/src -w /src -u $(id -u):$(id -g) -e HOME=/tmp quay.io/pypa/manylinux_2_28_x86_64 \
-  scripts/build-gdx-tools.sh tools/linux-x64
+python3 scripts/fetch-gdx-tools.py
 scripts/package.sh linux-x64
 ```
 
-The GitLab pipeline (`.gitlab-ci.yml`) builds the tools on the `linux`, `linux-arm64`, `macos`, `macos-arm64` and
-`windows` runners, runs the unit tests with them, packages all platforms and, on a tag matching the version,
-publishes to the Visual Studio Marketplace and Open VSX (manual jobs; CI/CD variables `VSCE_PAT` and `OVSX_PAT`).
-The licenses of the bundled components are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The GitLab pipeline (`.gitlab-ci.yml`) fetches the tools, smoke-tests them on the `linux-arm64`, `macos`,
+`macos-arm64` and `windows` runners, runs the unit tests with the Linux tools, packages all platforms and, on a tag
+matching the version, publishes to the Visual Studio Marketplace and Open VSX (manual jobs; CI/CD variables
+`VSCE_PAT` and `OVSX_PAT`). The bundled tools are subject to the GAMS license included with them (`bin/EULA.md`);
+see `THIRD_PARTY_NOTICES.md`.
 
 ## Development
 
