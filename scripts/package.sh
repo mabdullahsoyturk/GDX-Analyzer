@@ -19,11 +19,8 @@ mkdir -p dist
 # Only the tools of the target go into the package.
 rm -rf bin
 trap 'rm -rf "$root/bin"' EXIT
-# Relative links and images of README.md point to the repository (see CONTRIBUTING.md).
-repo=https://git.gams.com/msoyturk/gdx-vscode-extension
-args=(--skip-license --allow-missing-repository --no-dependencies
-  --baseImagesUrl "${README_IMAGES_URL:-$repo/-/raw/master/}"
-  --baseContentUrl "${README_CONTENT_URL:-$repo/-/blob/master/}")
+# vsce points the relative links and images of README.md to the repository in package.json.
+args=(--skip-license --no-dependencies)
 if [ "$target" = universal ]; then
   out="dist/$name-$version.vsix"
 else

@@ -35,9 +35,8 @@ scripts/package.sh universal           # dist/gdx-analyzer-<version>.vsix, witho
 Platforms: `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64` and `win32-x64`. The fetch script checks the
 downloads against their published digests and smoke-tests the tools of the platform it runs on.
 
-The README images are served from the repository: `scripts/package.sh` rewrites their relative links with
-`README_IMAGES_URL` and `README_CONTENT_URL` (by default the raw files of the `master` branch), so the Marketplace
-page shows them once those URLs are publicly readable.
+The README's relative links and images are rewritten to the public GitHub repository (`repository` in
+`package.json`) when packaging, so push new images to GitHub before publishing.
 
 ## Continuous integration
 

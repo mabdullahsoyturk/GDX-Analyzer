@@ -7,6 +7,14 @@
   "author": {
     "name": "Muhammet Soyturk"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mabdullahsoyturk/GDX-Analyzer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mabdullahsoyturk/GDX-Analyzer/issues"
+  },
+  "homepage": "https://github.com/mabdullahsoyturk/GDX-Analyzer#readme",
   "engines": {
     "vscode": "^1.101.0"
   },
