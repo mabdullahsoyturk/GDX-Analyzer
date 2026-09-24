@@ -2,7 +2,7 @@
   "name": "gdx-analyzer",
   "displayName": "GDX Analyzer",
   "description": "Browse, chart and compare GAMS GDX files: a fast viewer with table view, charts, gdxdiff comparisons, Excel export and MCP tools for AI agents. Independent; not affiliated with GAMS.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "muhammet-soyturk",
   "author": {
     "name": "Muhammet Soyturk"
