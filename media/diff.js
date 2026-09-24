@@ -125,6 +125,17 @@
     onQuery: (query) => selected && vscode.postMessage({ type: 'query', name: selected, query }),
     onColumnValues: (column) => selected && vscode.postMessage({ type: 'columnValues', name: selected, column }),
     onCopy: (req) => selected && vscode.postMessage({ type: 'copy', name: selected, ...req }),
+    onSelection: (req) => selected && vscode.postMessage({ type: 'selection', name: selected, ...req }),
+    onImage: (m) => selected && vscode.postMessage({ type: 'image', name: selected, ...m }),
+    imageInfo: () => {
+      const e = result && result.entries.find((x) => x.name === selected);
+      const base = (f) => f.split(/[\\/]/).pop();
+      return {
+        title: e ? `${e.name}: ${e.status}${e.text ? ' — ' + e.text : ''}` : selected || '',
+        file: result ? `${base(result.file1)} (file 1) ↔ ${base(result.file2)} (file 2)` : '',
+      };
+    },
+    chart: true,
     filterPlaceholder: 'Search differences…',
     tools: [
       h('button', { title: 'Copy the selected cells, or all filtered differences, as tab separated text (right-click cells for more)', onclick: () => table.copy('tab', true, true) }, 'Copy'),
@@ -271,6 +282,7 @@
       ),
     );
     if (changed) table.reset();
+    table.setDimension(e.dim || 0);
     if (e.diffRecords === undefined) {
       table.showMessage(
         e.inBoth

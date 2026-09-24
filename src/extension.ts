@@ -5,11 +5,38 @@ import { DiffPanel, cleanupDiffStorage } from './diff';
 import { DUMP_SCHEME, GdxDumpProvider, dumpUri } from './dump';
 import { GdxSymbol } from './parse';
 import { GdxService, describeTools } from './service';
+import { textDecoder } from './tools';
 import { ViewStateStore } from './viewState';
 import { GdxViewerProvider } from './viewer';
+import { registerMcpServer } from './mcpProvider';
 
 const LARGE_FILE_BYTES = 100 * 1024 * 1024;
 const GDX_FILTER = { 'GDX files': ['gdx'] };
+/** Encodings offered by GDX: Select Encoding (GDX files store labels as bytes). */
+const ENCODINGS: [string, string][] = [
+  ['utf-8', 'Unicode (default)'],
+  ['windows-1252', 'Western European (Latin-1)'],
+  ['iso-8859-15', 'Western European (Latin-9)'],
+  ['windows-1250', 'Central European'],
+  ['iso-8859-2', 'Central European (Latin-2)'],
+  ['windows-1251', 'Cyrillic'],
+  ['koi8-r', 'Cyrillic (KOI8-R)'],
+  ['windows-1253', 'Greek'],
+  ['windows-1254', 'Turkish'],
+  ['shift_jis', 'Japanese'],
+  ['gbk', 'Simplified Chinese'],
+  ['big5', 'Traditional Chinese'],
+  ['euc-kr', 'Korean'],
+];
+
+function isKnownEncoding(label: string): boolean {
+  try {
+    textDecoder(label);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function activate(context: vscode.ExtensionContext) {
   const service = new GdxService();
@@ -18,6 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
   let selectedForCompare: vscode.Uri | undefined;
 
   cleanupDiffStorage(context.globalStorageUri);
+  registerMcpServer(context, service);
 
   /** The GDX file a command applies to: its argument, the active viewer or the active dump document. */
   function currentGdx(arg?: unknown): vscode.Uri | undefined {
@@ -245,6 +273,39 @@ export function activate(context: vscode.ExtensionContext) {
         await viewer.states.clear(uri.fsPath);
         viewer.sessionFor(uri)?.resetState();
         vscode.window.setStatusBarMessage(`Reset the GDX viewer state of ${path.basename(uri.fsPath)}`, 3000);
+      }),
+    ),
+
+    vscode.commands.registerCommand(
+      'gdx.selectEncoding',
+      guarded('Changing the encoding failed', async () => {
+        const cfg = vscode.workspace.getConfiguration('gdx');
+        const current = cfg.get<string>('encoding', 'utf-8').trim().toLowerCase() || 'utf-8';
+        const items = ENCODINGS.map(([label, description]) => ({ label, description, picked: label === current }));
+        if (!items.some((i) => i.picked)) {
+          items.unshift({ label: current, description: 'current', picked: true });
+        }
+        const other = { label: 'Other…', description: 'Any WHATWG encoding label', picked: false };
+        const picked = await vscode.window.showQuickPick([...items, other], {
+          title: 'Encoding of Labels and Texts in GDX Files',
+          placeHolder: `Current: ${current}`,
+        });
+        let encoding = picked?.label;
+        if (picked === other) {
+          encoding = await vscode.window.showInputBox({
+            title: 'Encoding of Labels and Texts in GDX Files',
+            prompt: 'An encoding label such as windows-1252, iso-8859-2 or shift_jis',
+            value: current,
+            validateInput: (v) => (isKnownEncoding(v) ? undefined : `Unknown encoding "${v}"`),
+          });
+        }
+        if (!encoding || encoding === current) {
+          return;
+        }
+        // Where the setting is defined: the workspace keeps its own value.
+        const inspected = cfg.inspect<string>('encoding');
+        const target = inspected?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+        await cfg.update('encoding', encoding, target);
       }),
     ),
 

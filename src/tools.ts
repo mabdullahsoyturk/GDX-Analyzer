@@ -5,7 +5,7 @@
  * This module deliberately has no dependency on `vscode` so it can be unit tested.
  */
 import { spawn } from 'child_process';
-import { StringDecoder } from 'string_decoder';
+import { TextDecoder } from 'util';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -319,16 +319,32 @@ export interface RunOptions {
   timeoutMs?: number;
   cwd?: string;
   /**
-   * Receives the output as it arrives (decoded as UTF-8) instead of it being collected;
+   * Receives the output as it arrives (decoded with `encoding`) instead of it being collected;
    * RunResult.stdout then only holds the first few kilobytes (for error messages).
    */
   onStdout?: (chunk: string) => void;
+  /** Encoding of the output (a WHATWG encoding label); UTF-8 by default. */
+  encoding?: string;
+}
+
+/**
+ * A decoder for the text encoding `label` (e.g. "utf-8", "windows-1252", "latin1");
+ * throws a RangeError for unknown encodings.
+ */
+export function textDecoder(label = 'utf-8'): TextDecoder {
+  try {
+    return new TextDecoder(label.trim() || 'utf-8');
+  } catch {
+    throw new RangeError(`Unknown text encoding "${label}" (setting gdx.encoding).`);
+  }
 }
 
 /** Output kept for error messages when it is streamed. */
 const STREAMED_OUTPUT_KEPT = 16384;
 
 export function run(command: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
+  // Before spawning, so that an unknown encoding is reported without running the tool.
+  const decoder = textDecoder(opts.encoding);
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: opts.cwd,
@@ -341,7 +357,6 @@ export function run(command: string, args: string[], opts: RunOptions = {}): Pro
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let kept = 0;
-    const decoder = new StringDecoder('utf8');
     const stream = opts.onStdout;
     let streamError: unknown;
     child.stdout.on('data', (d: Buffer) => {
@@ -355,7 +370,7 @@ export function run(command: string, args: string[], opts: RunOptions = {}): Pro
       }
       if (streamError === undefined) {
         try {
-          stream(decoder.write(d));
+          stream(decoder.decode(d, { stream: true }));
         } catch (e) {
           // Stop the tool if the consumer fails (e.g. out of memory for the data).
           streamError = e;
@@ -368,7 +383,7 @@ export function run(command: string, args: string[], opts: RunOptions = {}): Pro
     child.on('close', (code, sig) => {
       if (stream && streamError === undefined) {
         try {
-          stream(decoder.end());
+          stream(decoder.decode());
         } catch (e) {
           streamError = e;
         }
@@ -379,7 +394,7 @@ export function run(command: string, args: string[], opts: RunOptions = {}): Pro
       }
       const result = {
         exitCode: code ?? -1,
-        stdout: Buffer.concat(out).toString('utf8'),
+        stdout: stream ? Buffer.concat(out).toString('utf8') : decoder.decode(Buffer.concat(out)),
         stderr: Buffer.concat(err).toString('utf8'),
       };
       if (sig && code === null) {
@@ -399,7 +414,12 @@ function clean(text: string): string {
 export type Logger = (line: string) => void;
 
 export class GdxTools {
-  constructor(readonly tools: ResolvedTools, private readonly log: Logger = () => {}) {}
+  /** `encoding`: the encoding of labels and texts in the GDX files (gdxdump writes them unchanged). */
+  constructor(
+    readonly tools: ResolvedTools,
+    private readonly log: Logger = () => {},
+    readonly encoding = 'utf-8',
+  ) {}
 
   private checkFile(file: string) {
     // `gamspy gdx dump|diff` appends ".gdx" to any file name not ending in lower-case ".gdx".
@@ -418,7 +438,7 @@ export class GdxTools {
 
   async dump(file: string, options: DumpOptions = {}, opts?: RunOptions): Promise<string> {
     this.checkFile(file);
-    const result = await this.exec(this.tools.gdxdump, buildDumpArgs(this.tools.backend, file, options), opts);
+    const result = await this.exec(this.tools.gdxdump, buildDumpArgs(this.tools.backend, file, options), { encoding: this.encoding, ...opts });
     if (result.exitCode !== 0) {
       const message = clean(result.stdout + '\n' + result.stderr) || `gdxdump failed with exit code ${result.exitCode}`;
       throw new ToolError(message, result);
@@ -432,7 +452,7 @@ export class GdxTools {
    */
   async dumpStream(file: string, options: DumpOptions, onChunk: (chunk: string) => void, opts?: RunOptions): Promise<void> {
     this.checkFile(file);
-    const result = await this.exec(this.tools.gdxdump, buildDumpArgs(this.tools.backend, file, options), { ...opts, onStdout: onChunk });
+    const result = await this.exec(this.tools.gdxdump, buildDumpArgs(this.tools.backend, file, options), { encoding: this.encoding, ...opts, onStdout: onChunk });
     if (result.exitCode !== 0) {
       const message = clean(result.stdout + '\n' + result.stderr) || `gdxdump failed with exit code ${result.exitCode}`;
       throw new ToolError(message, result);

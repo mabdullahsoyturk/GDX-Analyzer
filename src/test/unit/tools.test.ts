@@ -9,12 +9,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { parseDiffOutput, parseSymbolCsv, parseSymbols, parseUelTable, pivotDiff } from '../../parse';
-import { Backend, GdxTools, ResolvedTools, buildDiffArgs, buildDumpArgs, resolveTools } from '../../tools';
+import { Backend, GdxTools, ResolvedTools, buildDiffArgs, buildDumpArgs, resolveTools, run, textDecoder } from '../../tools';
 
 const fixtures = path.resolve(__dirname, '../../../test/fixtures');
 const t1 = path.join(fixtures, 'transport1.gdx');
 const t2 = path.join(fixtures, 'transport2.gdx');
 const edge = path.join(fixtures, 'edge.gdx');
+const latin1 = path.join(fixtures, 'latin1.gdx');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gdx ext test '));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
@@ -107,6 +108,21 @@ for (const backend of ['gams', 'gamspy'] as const) {
       ]);
     });
 
+    it('decodes labels and texts with the configured encoding', async () => {
+      const read = async (t: GdxTools) => parseSymbolCsv(await t.dump(latin1, { symbol: 'c', format: 'csv', csvSetText: true }), { dim: 1, type: 'Set', domain: ['*'] }).rows;
+      assert.deepEqual(await read(new GdxTools(resolved!, undefined, 'windows-1252')), [
+        ['stück', 'Größe'],
+        ['b', ''],
+      ]);
+      // As UTF-8, the Latin-1 bytes are invalid and replaced.
+      assert.equal((await read(tools))[0][0], 'st\uFFFDck');
+      const uels = parseUelTable(await new GdxTools(resolved!, undefined, 'latin1').dump(latin1, { uelTable: 'uels', noData: true }));
+      assert.deepEqual(uels, ['stück', 'b']);
+      const chunks: string[] = [];
+      await new GdxTools(resolved!, undefined, 'windows-1252').dumpStream(latin1, { symbol: 'p' }, (c) => chunks.push(c));
+      assert.match(chunks.join(''), /précis/);
+    });
+
     it('lists the unique elements in GDX order', async () => {
       const uels = parseUelTable(await tools.dump(t1, { uelTable: 'uels', noData: true }));
       assert.deepEqual(uels.slice(0, 5), ['seattle', 'san-diego', 'new-york', 'chicago', 'topeka']);
@@ -150,6 +166,21 @@ for (const backend of ['gams', 'gamspy'] as const) {
     });
   });
 }
+
+describe('output encoding', () => {
+  it('rejects unknown encodings before running the tool', async () => {
+    assert.throws(() => textDecoder('no-such-encoding'), /Unknown text encoding "no-such-encoding"/);
+    assert.throws(() => run(process.execPath, ['-e', ''], { encoding: 'no-such-encoding' }), RangeError);
+  });
+
+  it('decodes collected and streamed output', async () => {
+    const script = "process.stdout.write(Buffer.from([0x73, 0x74, 0xfc, 0x63, 0x6b]))";
+    assert.equal((await run(process.execPath, ['-e', script], { encoding: 'windows-1252' })).stdout, 'stück');
+    let streamed = '';
+    await run(process.execPath, ['-e', script], { encoding: 'windows-1252', onStdout: (c) => (streamed += c) });
+    assert.equal(streamed, 'stück');
+  });
+});
 
 describe('gdxdiff options', () => {
   it('builds the arguments of all options', () => {

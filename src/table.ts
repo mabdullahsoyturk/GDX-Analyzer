@@ -5,10 +5,10 @@
  * Supports a text filter, column filters, sorting, hidden value columns and a
  * pivoted "table view" with some dimensions as rows and the others as columns.
  */
-import { ColumnStore, LabelColumn, Labels, NumberColumn, Sp, StoredColumn, specialCode } from './columns';
+import { ColumnStore, ColumnStoreBuilder, LabelColumn, Labels, NumberColumn, Sp, StoredColumn, specialCode } from './columns';
 import { fieldDefaults } from './defaults';
 import { NumberFormat, formatNumber } from './format';
-import type { SymbolColumns, SymbolData, SymbolDiff } from './parse';
+import type { GdxSymbol, SymbolColumns, SymbolData, SymbolDiff } from './parse';
 import { TextSearch, canMatchNumbers, compileSearch, isSearchError } from './search';
 
 export type ColumnKind = 'key' | 'value' | 'text' | 'status';
@@ -18,6 +18,8 @@ export interface Column {
   kind: ColumnKind;
   /** For difference tables: which file the column's values come from. */
   side?: 1 | 2;
+  /** For difference tables: the column holds differences (file 2 − file 1). */
+  delta?: boolean;
 }
 
 export interface Row {
@@ -55,6 +57,8 @@ export interface LabelFilter {
   column: number;
   labels: string[];
   exclude?: boolean;
+  /** Compare the labels case-insensitively (as GAMS does). */
+  ignoreCase?: boolean;
 }
 
 /**
@@ -109,7 +113,17 @@ export interface TableQuery extends RowSelection {
   /** Indexes of value/text columns that are not shown. */
   hidden?: number[];
   page?: number;
+  /** The first row to return (instead of `page`), e.g. for a window of a continuously scrolled view. */
+  offset?: number;
   pageSize: number;
+}
+
+/** The first row of a window: `offset` if given, else the start of `page`; clamped to the rows. */
+function windowStart(q: { page?: number; offset?: number }, pageSize: number, rowCount: number): number {
+  const last = Math.max(0, rowCount - 1);
+  if (q.offset !== undefined && Number.isFinite(q.offset)) return Math.min(Math.max(0, Math.floor(q.offset)), last);
+  const pageCount = Math.max(1, Math.ceil(rowCount / pageSize));
+  return Math.min(Math.max(0, q.page ?? 0), pageCount - 1) * pageSize;
 }
 
 interface Paging {
@@ -139,6 +153,8 @@ export interface PivotQuery extends RowSelection {
   rowDims?: number[];
   colDims?: number[];
   page?: number;
+  /** The first pivot row to return (instead of `page`). */
+  offset?: number;
   pageSize: number;
   colPage?: number;
   colPageSize: number;
@@ -165,6 +181,74 @@ export interface PivotPage extends Paging {
   colPageCount: number;
   /** Number of pivot columns. */
   colCount: number;
+}
+
+/** Statistics of one column over the rows of a selection (see TableView.stats). */
+export interface ColumnStats {
+  column: number;
+  name: string;
+  kind: ColumnKind;
+  /** Key, text and status columns: the number of distinct labels, and the first ones (in order of appearance). */
+  distinct?: number;
+  labels?: string[];
+  /** Value columns: the numbers (without special values). */
+  count?: number;
+  sum?: number;
+  min?: number;
+  max?: number;
+  zeros?: number;
+  /** Value columns: the number of each special value (only those that occur). */
+  specials?: Partial<Record<'Eps' | 'NA' | '+Inf' | '-Inf' | 'Undf' | 'empty' | 'text', number>>;
+}
+
+export type ChartType = 'bar' | 'line' | 'heatmap';
+
+/** What a chart shows: labels of `x` along the category axis, one series per label of `series`, the numbers of `value`. */
+export interface ChartSpec {
+  type?: ChartType;
+  x?: number;
+  /**
+   * A key column other than `x`: one series per label; -1 for a single series; FIELD_SERIES
+   * for one series per column of `fields` (e.g. the values of both files of a comparison).
+   */
+  series?: number;
+  value?: number;
+  /** With series FIELD_SERIES: the value columns shown as series. */
+  fields?: number[];
+}
+
+/** ChartSpec.series: the value columns of ChartSpec.fields are the series. */
+export const FIELD_SERIES = -2;
+
+export interface ChartQuery extends RowSelection {
+  chart?: ChartSpec;
+}
+
+/** Most categories of a bar or line chart and most rows/columns of a heatmap. */
+export const MAX_CHART_CATEGORIES = 500;
+/** Most series of a bar or line chart (the categorical palette); the others are summed as "Other". */
+export const MAX_CHART_SERIES = 8;
+
+export interface ChartData extends Paging {
+  kind: 'chart';
+  allColumns: Column[];
+  /** The spec in effect (validated, with defaults). */
+  chart: Required<ChartSpec>;
+  /** A single series of differences: bars are colored by their sign. */
+  signColors: boolean;
+  /** Category labels (GDX order). */
+  categories: string[];
+  /** Per series: its name, its palette slot (-1 for "Other") and a value per category (null: no number). */
+  series: { name: string; slot: number; values: (number | null)[] }[];
+  /** Key columns whose labels are summed (not on an axis). */
+  summed: number[];
+  /** Categories (and heatmap rows) left out beyond MAX_CHART_CATEGORIES. */
+  omittedCategories: number;
+  omittedSeries: number;
+  /** Values that are not charted: NA, +Inf, -Inf and Undf. */
+  skipped: Partial<Record<SpecialValue, number>>;
+  /** Number of Eps values (charted as 0). */
+  eps: number;
 }
 
 export interface ColumnValues {
@@ -403,9 +487,10 @@ export class TableView {
       }
       if (f.type === 'labels') {
         const { ids, labels } = this.cells.labels(f.column);
-        const set = new Set(f.labels);
+        const fold = f.ignoreCase ? (l: string) => l.toLowerCase() : (l: string) => l;
+        const set = new Set(f.labels.map(fold));
         const ok = new Uint8Array(labels.length);
-        labels.forEach((l, id) => (ok[id] = set.has(l) !== !!f.exclude ? 1 : 0));
+        labels.forEach((l, id) => (ok[id] = set.has(fold(l)) !== !!f.exclude ? 1 : 0));
         tests.push((r) => ok[ids[r]] === 1);
       } else {
         const { values, special } = this.cells.numbers(f.column);
@@ -570,8 +655,8 @@ export class TableView {
     const index = this.indexFor(q);
     const pageSize = Math.max(1, q.pageSize);
     const pageCount = Math.max(1, Math.ceil(index.length / pageSize));
-    const page = Math.min(Math.max(0, q.page ?? 0), pageCount - 1);
-    const offset = page * pageSize;
+    const offset = windowStart(q, pageSize, index.length);
+    const page = Math.floor(offset / pageSize);
     const columnIndex = this.visibleColumns(q.hidden, q.squeeze, q.order);
     const show = this.formatter(q.format);
     const project = (r: number): Row => {
@@ -601,6 +686,60 @@ export class TableView {
     };
   }
 
+  /** Statistics of every column over the rows matching the selection; `maxLabels` limits ColumnStats.labels. */
+  stats(selection: RowSelection, maxLabels = 10): { rows: number; columns: ColumnStats[] } {
+    const index = this.indexFor(selection);
+    const columns = this.table.columns.map((col, c): ColumnStats => {
+      if (col.kind !== 'value') {
+        const { ids, labels } = this.cells.labels(c);
+        const seen = new Uint8Array(labels.length);
+        const first: string[] = [];
+        let distinct = 0;
+        for (const r of index) {
+          if (!seen[ids[r]]) {
+            seen[ids[r]] = 1;
+            distinct++;
+            if (first.length < maxLabels) first.push(labels[ids[r]]);
+          }
+        }
+        return { column: c, name: col.name, kind: col.kind, distinct, labels: first };
+      }
+      const { values, special } = this.cells.numbers(c);
+      let count = 0;
+      let sum = 0;
+      let min = Infinity;
+      let max = -Infinity;
+      let zeros = 0;
+      const bySpecial = new Uint32Array(8);
+      for (const r of index) {
+        const sp = special[r];
+        if (sp !== Sp.None) {
+          bySpecial[sp]++;
+          continue;
+        }
+        const x = values[r];
+        count++;
+        sum += x;
+        if (x < min) min = x;
+        if (x > max) max = x;
+        if (x === 0) zeros++;
+      }
+      const specials: ColumnStats['specials'] = {};
+      const names: [Sp, keyof NonNullable<ColumnStats['specials']>][] = [
+        [Sp.Eps, 'Eps'],
+        [Sp.NA, 'NA'],
+        [Sp.PInf, '+Inf'],
+        [Sp.MInf, '-Inf'],
+        [Sp.Undf, 'Undf'],
+        [Sp.Empty, 'empty'],
+        [Sp.Text, 'text'],
+      ];
+      for (const [sp, name] of names) if (bySpecial[sp]) specials[name] = bySpecial[sp];
+      return { column: c, name: col.name, kind: col.kind, count, sum, min: count ? min : undefined, max: count ? max : undefined, zeros, specials };
+    });
+    return { rows: index.length, columns };
+  }
+
   /** Formats the cells of value columns (numbers) with the given number format. */
   private formatter(format: NumberFormat | undefined): (column: number, value: string) => string {
     const numeric = this.table.columns.map((c) => c.kind === 'value');
@@ -620,6 +759,166 @@ export class TableView {
     const order = labels.map((_, id) => id).filter((id) => present[id]).sort((a, b) => rank[a] - rank[b]);
     const values = order.slice(0, MAX_COLUMN_VALUES).map((id) => labels[id]);
     return { column, values, truncated: order.length > MAX_COLUMN_VALUES };
+  }
+
+  /**
+   * Chart data of the rows matching the selection: the numbers of a value column by the labels
+   * of one key column (categories) and optionally another (series); the other key columns are
+   * summed. Labels are in GDX order. Bar and line charts have at most MAX_CHART_SERIES series
+   * (the rest are summed as "Other"); a heatmap has one row per series label.
+   */
+  chart(q: ChartQuery): ChartData {
+    const keys = this.keyColumns;
+    const values = this.table.columns.flatMap((c, i) => (c.kind === 'value' ? [i] : []));
+    const spec = q.chart ?? {};
+    const type: ChartType = spec.type === 'line' || spec.type === 'heatmap' ? spec.type : 'bar';
+    const x = keys.includes(spec.x as number) ? (spec.x as number) : keys[keys.length - 1];
+    const fields = (spec.fields ?? []).filter((f) => values.includes(f));
+    let series =
+      keys.includes(spec.series as number) && spec.series !== x
+        ? (spec.series as number)
+        : spec.series === -1 || (spec.series === FIELD_SERIES && fields.length && type !== 'heatmap')
+          ? (spec.series as number)
+          : undefined;
+    if (series === undefined) series = keys.length >= 2 ? keys.find((k) => k !== x)! : -1;
+    if (type === 'heatmap' && series < 0 && keys.length >= 2) series = keys.find((k) => k !== x)!;
+    const bySeries = series === FIELD_SERIES;
+    // Comparisons: the differences by default.
+    const value = values.includes(spec.value as number) ? (spec.value as number) : bySeries ? fields[0] : (values.find((c) => this.table.columns[c].delta) ?? values[0]);
+    const index = this.indexFor(q);
+    const base = {
+      kind: 'chart' as const,
+      allColumns: this.table.columns,
+      chart: { type, x, series, value, fields: bySeries ? fields : [] },
+      signColors: !bySeries && series === -1 && !!this.table.columns[value]?.delta,
+      summed: keys.filter((k) => k !== x && (bySeries || k !== series)),
+      offset: 0,
+      page: 0,
+      pageCount: 1,
+      filteredCount: index.length,
+      totalCount: this.cells.length,
+    };
+    if (x === undefined || value === undefined) {
+      return { ...base, categories: [], series: [], omittedCategories: 0, omittedSeries: 0, skipped: {}, eps: 0 };
+    }
+
+    // Categories and series labels that occur, in GDX order.
+    const occurring = (col: number) => {
+      const { ids, labels } = this.cells.labels(col);
+      const seen = new Uint8Array(labels.length);
+      for (const r of index) seen[ids[r]] = 1;
+      const rank = this.ranks(col);
+      return labels.map((_, id) => id).filter((id) => seen[id]).sort((a, b) => rank[a] - rank[b]);
+    };
+    const xs = occurring(x);
+    const shownX = xs.slice(0, MAX_CHART_CATEGORIES);
+    const xPos = new Int32Array(this.cells.labels(x).labels.length).fill(-1);
+    shownX.forEach((id, i) => (xPos[id] = i));
+
+    let seriesIds: number[] = [];
+    let seriesPos: Int32Array | undefined;
+    let omittedSeries = 0;
+    let other = false;
+    if (bySeries) {
+      return { ...base, ...this.fieldSeries(index, x, xs, shownX, xPos, fields) };
+    }
+    if (series >= 0) {
+      const ss = occurring(series);
+      const cap = type === 'heatmap' ? MAX_CHART_CATEGORIES : MAX_CHART_SERIES;
+      seriesPos = new Int32Array(this.cells.labels(series).labels.length).fill(-1);
+      if (ss.length > cap) {
+        seriesIds = ss.slice(0, type === 'heatmap' ? cap : cap - 1);
+        omittedSeries = ss.length - seriesIds.length;
+        other = type !== 'heatmap';
+        if (other) ss.slice(seriesIds.length).forEach((id) => (seriesPos![id] = seriesIds.length));
+      } else {
+        seriesIds = ss;
+      }
+      seriesIds.forEach((id, i) => (seriesPos![id] = i));
+    }
+    const nSeries = series >= 0 ? seriesIds.length + (other ? 1 : 0) : 1;
+    const sums = Array.from({ length: nSeries }, () => new Float64Array(shownX.length));
+    const has = Array.from({ length: nSeries }, () => new Uint8Array(shownX.length));
+    const skipped: Partial<Record<SpecialValue, number>> = {};
+    let eps = 0;
+    const xIds = this.cells.labels(x).ids;
+    const sIds = series >= 0 ? this.cells.labels(series).ids : undefined;
+    const num = this.cells.numbers(value);
+    for (const r of index) {
+      const c = xPos[xIds[r]];
+      const sPos = sIds ? seriesPos![sIds[r]] : 0;
+      if (c < 0 || sPos < 0) continue;
+      const sp = num.special[r];
+      if (sp === Sp.None || sp === Sp.Eps) {
+        if (sp === Sp.None) sums[sPos][c] += num.values[r];
+        else eps++;
+        has[sPos][c] = 1;
+      } else if (SPECIAL_OF_CODE[sp as Sp]) {
+        const name = SPECIAL_OF_CODE[sp as Sp]!;
+        skipped[name] = (skipped[name] ?? 0) + 1;
+      }
+    }
+    // Palette slots follow the label, not its position among the shown series, when the column has few labels.
+    const seriesLabels = series >= 0 ? this.cells.labels(series).labels : [];
+    const allSeries = series >= 0 && type !== 'heatmap' ? this.occurringLabels(series) : undefined;
+    const stable = allSeries && allSeries.length <= MAX_CHART_SERIES ? new Map(allSeries.map((id, i) => [id, i])) : undefined;
+    const out = Array.from({ length: nSeries }, (_, i) => ({
+      name: series < 0 ? this.table.columns[value].name : i < seriesIds.length ? seriesLabels[seriesIds[i]] : `Other (${omittedSeries})`,
+      slot: series < 0 ? 0 : i < seriesIds.length ? (stable?.get(seriesIds[i]) ?? i) : -1,
+      values: Array.from(sums[i], (v, c) => (has[i][c] ? v : null)),
+    }));
+    return {
+      ...base,
+      categories: shownX.map((id) => this.cells.labels(x).labels[id]),
+      series: out,
+      omittedCategories: xs.length - shownX.length,
+      omittedSeries: type === 'heatmap' ? omittedSeries : 0,
+      skipped,
+      eps,
+    };
+  }
+
+  /** Chart series from value columns (one per column), by the labels of `x`. */
+  private fieldSeries(index: Int32Array, x: number, xs: number[], shownX: number[], xPos: Int32Array, fields: number[]) {
+    const xIds = this.cells.labels(x).ids;
+    const skipped: Partial<Record<SpecialValue, number>> = {};
+    let eps = 0;
+    const series = fields.map((f, slot) => {
+      const num = this.cells.numbers(f);
+      const sums = new Float64Array(shownX.length);
+      const has = new Uint8Array(shownX.length);
+      for (const r of index) {
+        const c = xPos[xIds[r]];
+        if (c < 0) continue;
+        const sp = num.special[r];
+        if (sp === Sp.None || sp === Sp.Eps) {
+          if (sp === Sp.None) sums[c] += num.values[r];
+          else eps++;
+          has[c] = 1;
+        } else if (SPECIAL_OF_CODE[sp as Sp]) {
+          const name = SPECIAL_OF_CODE[sp as Sp]!;
+          skipped[name] = (skipped[name] ?? 0) + 1;
+        }
+      }
+      return { name: this.table.columns[f].name, slot, values: Array.from(sums, (v, c) => (has[c] ? v : null)) };
+    });
+    return {
+      categories: shownX.map((id) => this.cells.labels(x).labels[id]),
+      series,
+      omittedCategories: xs.length - shownX.length,
+      omittedSeries: 0,
+      skipped,
+      eps,
+    };
+  }
+
+  /** The labels of a key column that occur in any record, in GDX order. */
+  occurringLabels(column: number): number[] {
+    const { ids, labels } = this.cells.labels(column);
+    const seen = new Uint8Array(labels.length);
+    for (let r = 0; r < ids.length; r++) seen[ids[r]] = 1;
+    const rank = this.ranks(column);
+    return labels.map((_, id) => id).filter((id) => seen[id]).sort((a, b) => rank[a] - rank[b]);
   }
 
   /** Validated row/column dimensions: by default the last key column is shown as columns. */
@@ -775,8 +1074,8 @@ export class TableView {
     const rowCount = p.rowReps.length;
     const pageSize = Math.max(1, q.pageSize);
     const pageCount = Math.max(1, Math.ceil(rowCount / pageSize));
-    const page = Math.min(Math.max(0, q.page ?? 0), pageCount - 1);
-    const offset = page * pageSize;
+    const offset = windowStart(q, pageSize, rowCount);
+    const page = Math.floor(offset / pageSize);
     const colPageSize = Math.max(1, q.colPageSize);
     const colPageCount = Math.max(1, Math.ceil(p.columnCount / colPageSize));
     const colPage = Math.min(Math.max(0, q.colPage ?? 0), colPageCount - 1);
@@ -987,6 +1286,44 @@ export class TableView {
     return { rows, headerRows: labels ? p.levels.length : 0, headerCols: labels ? p.rowDims.length : 0, cells: Math.max(0, r1 - r0 + 1) * cols.length };
   }
 
+  /** Statistics of the numbers among the selected cells of the list view (positions as in gridList). */
+  selectionStatsList(q: TableQuery, sel: CellSelection): SelectionStats {
+    const columnIndex = this.visibleColumns(q.hidden, q.squeeze, q.order);
+    const index = this.indexFor(q);
+    const [r0, r1] = sel.all ? [0, index.length - 1] : clampRange(sel.rows, index.length);
+    const [c0, c1] = sel.all ? [0, columnIndex.length - 1] : clampRange(sel.cols, columnIndex.length);
+    const stats = new StatsAccumulator();
+    for (const c of columnIndex.slice(c0, c1 + 1)) {
+      const numeric = this.table.columns[c].kind === 'value' ? this.cells.numbers(c) : undefined;
+      for (let r = r0; r <= r1; r++) {
+        if (numeric) stats.add(numeric.special[index[r]], numeric.values[index[r]]);
+        else stats.label(this.cells.get(index[r], c));
+      }
+    }
+    return stats.result();
+  }
+
+  /** Statistics of the numbers among the selected cells of the table view (positions as in gridPivot, without labels). */
+  selectionStatsPivot(q: Omit<PivotQuery, 'page' | 'pageSize' | 'colPage' | 'colPageSize'>, sel: CellSelection): SelectionStats {
+    const p = this.pivotData({ ...q, pageSize: 1, colPageSize: 1 });
+    const [r0, r1] = sel.all ? [0, p.rowReps.length - 1] : clampRange(sel.rows, p.rowReps.length);
+    const [c0, c1] = sel.all ? [0, p.columnCount - 1] : clampRange(sel.cols, p.columnCount);
+    const nv = p.valueColumns.length;
+    const numeric = p.valueColumns.map((c) => (this.table.columns[c].kind === 'value' ? this.cells.numbers(c) : undefined));
+    const stats = new StatsAccumulator();
+    for (let r = r0; r <= r1; r++) {
+      const records = this.rowCellRecords(p, r);
+      for (let c = c0; c <= c1; c++) {
+        const rec = records.get(Math.floor(c / nv));
+        const n = numeric[c % nv];
+        if (rec === undefined) stats.add(Sp.Empty, 0);
+        else if (n) stats.add(n.special[rec], n.values[rec]);
+        else stats.label(this.textOf(p.valueColumns[c % nv], this.cells.get(rec, p.valueColumns[c % nv])));
+      }
+    }
+    return stats.result();
+  }
+
   /** The selected cells of the list view as text (see gridList). */
   copyList(q: TableQuery, sel: CellSelection, opts: CopyOptions): CopyResult {
     return gridText(this.gridList(q, sel, true, opts.limits), opts);
@@ -1013,6 +1350,58 @@ export interface CellSelection {
   all?: boolean;
   rows?: [number, number];
   cols?: [number, number];
+}
+
+/** Statistics of selected cells, like a spreadsheet's status bar. */
+export interface SelectionStats {
+  /** Selected cells, including empty ones. */
+  cells: number;
+  /** Cells with a number (special values are not numbers). */
+  numbers: number;
+  sum: number;
+  min?: number;
+  max?: number;
+  /** Cells with a special value (only those that occur). */
+  specials: Partial<Record<SpecialValue, number>>;
+  /** Cells that are neither numbers, special values nor empty (labels, texts). */
+  texts: number;
+}
+
+const SPECIAL_OF_CODE: Partial<Record<Sp, SpecialValue>> = { [Sp.Eps]: 'eps', [Sp.NA]: 'na', [Sp.PInf]: 'pinf', [Sp.MInf]: 'minf', [Sp.Undf]: 'undf' };
+
+class StatsAccumulator {
+  private cells = 0;
+  private numbers = 0;
+  private sum = 0;
+  private min = Infinity;
+  private max = -Infinity;
+  private texts = 0;
+  private readonly specials: Partial<Record<SpecialValue, number>> = {};
+
+  add(sp: Sp, x: number) {
+    this.cells++;
+    if (sp === Sp.None) {
+      this.numbers++;
+      this.sum += x;
+      if (x < this.min) this.min = x;
+      if (x > this.max) this.max = x;
+    } else if (sp === Sp.Text) {
+      this.texts++;
+    } else if (sp !== Sp.Empty) {
+      const name = SPECIAL_OF_CODE[sp]!;
+      this.specials[name] = (this.specials[name] ?? 0) + 1;
+    }
+  }
+
+  label(v: string) {
+    this.cells++;
+    if (v !== '') this.texts++;
+  }
+
+  result(): SelectionStats {
+    const { cells, numbers, sum, texts, specials } = this;
+    return numbers ? { cells, numbers, sum, min: this.min, max: this.max, specials, texts } : { cells, numbers, sum: 0, specials, texts };
+  }
 }
 
 /** Limits of a grid (checked before it is built, so that huge selections fail early). */
@@ -1174,6 +1563,35 @@ export function columnTable(columns: string[], keyCount: number, store: ColumnSt
   };
 }
 
+/** Name of the pseudo-symbol listing the unique elements (like GAMS Studio's "Universe"). */
+export const UNIVERSE = '*';
+
+/** The universe as the first entry of the symbol list: a one-dimensional set of all labels. */
+export function universeSymbol(version: [string, string][]): GdxSymbol & { universe: true } {
+  const count = Number(version.find(([k]) => /^unique elements$/i.test(k))?.[1]);
+  return {
+    name: UNIVERSE,
+    dim: 1,
+    type: 'Set',
+    records: Number.isFinite(count) ? count : 0,
+    text: 'Universe: all unique elements in GDX order',
+    domain: ['*'],
+    entry: 0,
+    universe: true,
+  };
+}
+
+/** The unique elements with their numbers in the GDX file (UEL numbers, from 1). */
+export function universeTable(uels: string[]): Table {
+  const builder = new ColumnStoreBuilder(['label', 'number'], uels.length);
+  uels.forEach((label, i) => {
+    builder.set(0, label);
+    builder.set(1, String(i + 1));
+    builder.endRow();
+  });
+  return columnTable(['Label', 'UEL #'], 1, builder.build());
+}
+
 const STATUS_LABEL = { changed: 'changed', only1: 'only in file 1', only2: 'only in file 2' } as const;
 
 function delta(a: string | undefined, b: string | undefined): string {
@@ -1206,7 +1624,7 @@ export function diffTable(diff: SymbolDiff): Table {
     const kind = name === 'Text' ? 'text' : 'value';
     columns.push({ name: `${name} (file 1)`, kind, side: 1 }, { name: `${name} (file 2)`, kind, side: 2 });
     if (kind === 'value') {
-      columns.push({ name: `Δ ${name}`, kind: 'value' });
+      columns.push({ name: `Δ ${name}`, kind: 'value', delta: true });
     }
   }
   const rows = diff.records.map((r): Row => {
@@ -1322,7 +1740,7 @@ export function diffColumnTable(data: SymbolColumns): Table {
     const v2 = pick(c, row2);
     stored.push(v1, v2);
     if (kind === 'value' && v1.type === 'number' && v2.type === 'number') {
-      columns.push({ name: `Δ ${name}`, kind: 'value' });
+      columns.push({ name: `Δ ${name}`, kind: 'value', delta: true });
       const values = new Float64Array(m);
       const special = new Uint8Array(m).fill(Sp.Empty);
       for (let rec = 0; rec < m; rec++) {

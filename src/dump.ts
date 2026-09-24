@@ -34,7 +34,14 @@ export class GdxDumpProvider implements vscode.TextDocumentContentProvider, vsco
   private readonly disposables: vscode.Disposable[] = [this.changed];
 
   constructor(private readonly service: GdxService) {
-    this.disposables.push(vscode.workspace.onDidCloseTextDocument(() => this.pruneWatchers()));
+    this.disposables.push(
+      vscode.workspace.onDidCloseTextDocument(() => this.pruneWatchers()),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('gdx.encoding')) {
+          this.refresh(() => true);
+        }
+      }),
+    );
   }
 
   dispose() {
@@ -71,13 +78,7 @@ export class GdxDumpProvider implements vscode.TextDocumentContentProvider, vsco
     let timer: NodeJS.Timeout | undefined;
     const refresh = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => {
-        for (const doc of vscode.workspace.textDocuments) {
-          if (doc.uri.scheme === DUMP_SCHEME && targetOf(doc.uri).file === file) {
-            this.changed.fire(doc.uri);
-          }
-        }
-      }, 500);
+      timer = setTimeout(() => this.refresh((f) => f === file), 500);
     };
     const subs = [watcher, watcher.onDidChange(refresh), watcher.onDidCreate(refresh)];
     this.watchers.set(file, {
@@ -86,6 +87,15 @@ export class GdxDumpProvider implements vscode.TextDocumentContentProvider, vsco
         subs.forEach((s) => s.dispose());
       },
     });
+  }
+
+  /** Reads the open dump documents of the files that match again. */
+  private refresh(matches: (file: string) => boolean) {
+    for (const doc of vscode.workspace.textDocuments) {
+      if (doc.uri.scheme === DUMP_SCHEME && matches(targetOf(doc.uri).file)) {
+        this.changed.fire(doc.uri);
+      }
+    }
   }
 
   private pruneWatchers() {

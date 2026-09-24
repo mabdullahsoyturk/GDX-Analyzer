@@ -64,6 +64,33 @@ const tests: [string, () => Promise<void>][] = [
     },
   ],
   [
+    'registers the MCP server for AI agents',
+    async () => {
+      const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-viewer');
+      assert.ok(ext?.isActive);
+      assert.deepEqual(ext.packageJSON.contributes.mcpServerDefinitionProviders, [{ id: 'gdx.mcp', label: 'GDX' }]);
+      assert.ok((await vscode.commands.getCommands(true)).includes('gdx.copyMcpServerConfig'));
+    },
+  ],
+  [
+    'reads labels with the configured encoding',
+    async () => {
+      const latin1 = vscode.Uri.file(path.join(fixtures, 'latin1.gdx'));
+      const cfg = vscode.workspace.getConfiguration('gdx');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand('gdx.dumpSymbol', latin1, 'c');
+      await waitFor('UTF-8 dump', () => (activeText()?.includes('�') ? activeText() : undefined));
+      try {
+        // The open dump is read again when the setting changes.
+        await cfg.update('encoding', 'windows-1252', vscode.ConfigurationTarget.Global);
+        const text = await waitFor('Latin-1 dump', () => (activeText()?.includes('stück') ? activeText() : undefined));
+        assert.match(text, /Größe/);
+      } finally {
+        await cfg.update('encoding', undefined, vscode.ConfigurationTarget.Global);
+      }
+    },
+  ],
+  [
     'dumps files and symbols (GAMSPy backend)',
     async () => {
       const gamspy = process.env.GDX_TEST_GAMSPY;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { pivotDiff } from '../../parse';
-import { TableView, compareValues, diffTable, symbolTable } from '../../table';
+import { TableView, compareValues, diffTable, symbolTable, universeSymbol, universeTable } from '../../table';
 
 describe('compareValues', () => {
   it('orders special values around numbers', () => {
@@ -52,6 +52,24 @@ describe('TableView', () => {
 
   it('exports the filtered rows as TSV', () => {
     assert.equal(view.toTsv({ filter: 'o', sortColumn: 0, pageSize: 1 }), 'i\tValue\nchicago\t20\nnew-york\tEps\nsan-diego\t600\ntopeka\t-Inf\n');
+  });
+});
+
+describe('universe', () => {
+  it('is an entry with the number of unique elements', () => {
+    const s = universeSymbol([['Symbols', '6'], ['Unique Elements', '4']]);
+    assert.deepEqual([s.name, s.type, s.dim, s.records, s.entry], ['*', 'Set', 1, 4, 0]);
+    assert.equal(universeSymbol([]).records, 0);
+  });
+
+  it('lists the unique elements with their numbers, sortable by label', () => {
+    const view = new TableView(universeTable(['seattle', 'san-diego', 'new-york']));
+    assert.deepEqual(view.query({ pageSize: 10 }).rows.map((r) => r.cells), [
+      ['seattle', '1'],
+      ['san-diego', '2'],
+      ['new-york', '3'],
+    ]);
+    assert.deepEqual(view.query({ sortColumn: 0, pageSize: 10 }).rows.map((r) => r.cells[1]), ['3', '2', '1']);
   });
 });
 

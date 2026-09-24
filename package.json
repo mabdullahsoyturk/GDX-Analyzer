@@ -5,7 +5,7 @@
   "version": "0.8.0",
   "publisher": "gams",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.101.0"
   },
   "categories": [
     "Data Science",
@@ -32,6 +32,12 @@
           }
         ],
         "priority": "default"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "gdx.mcp",
+        "label": "GDX"
       }
     ],
     "commands": [
@@ -78,6 +84,16 @@
       {
         "command": "gdx.resetViewState",
         "title": "Reset Viewer State",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.selectEncoding",
+        "title": "Select Encoding of Labels…",
+        "category": "GDX"
+      },
+      {
+        "command": "gdx.copyMcpServerConfig",
+        "title": "Copy MCP Server Configuration for AI Agents…",
         "category": "GDX"
       },
       {
@@ -177,17 +193,31 @@
           "scope": "machine-overridable",
           "description": "Path to the gamspy executable. If empty, a .venv in the workspace folders and then the PATH are searched."
         },
+        "gdx.encoding": {
+          "type": "string",
+          "default": "utf-8",
+          "examples": [
+            "utf-8",
+            "windows-1252",
+            "iso-8859-15",
+            "windows-1250",
+            "windows-1251",
+            "shift_jis",
+            "gbk"
+          ],
+          "markdownDescription": "Encoding of the labels and explanatory texts in GDX files, e.g. `utf-8`, `windows-1252` (Latin-1) or `shift_jis`. GDX files store them as bytes as written by GAMS, so files created from sources in a legacy encoding show wrong characters with `utf-8`. Applies to the viewer, the comparison view and the gdxdump output. *GDX: Select Encoding of Labels…* picks one from a list."
+        },
         "gdx.maxRowsPerPage": {
           "type": "number",
           "default": 500,
           "minimum": 50,
-          "description": "Number of records (list view) or rows (table view) shown per page in the GDX viewer."
+          "description": "Number of records (list view) or rows (table view) loaded at once in the GDX viewer and the comparison view; more are loaded while scrolling."
         },
         "gdx.maxColumnsPerPage": {
           "type": "number",
           "default": 100,
           "minimum": 10,
-          "description": "Number of columns shown per page in the table view of the GDX viewer."
+          "description": "Number of columns shown per page in the table view of the GDX viewer (wider tables page their columns)."
         },
         "gdx.numberFormat.style": {
           "type": "string",
@@ -310,7 +340,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/vscode": "~1.90.0",
+    "@types/vscode": "~1.101.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "typescript": "^5.9.0"

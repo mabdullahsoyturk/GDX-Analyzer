@@ -3,8 +3,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { GdxSymbol, parseUelTable } from './parse';
 import { GdxFileInfo, GdxService, describeTools, errorMessage } from './service';
-import { TableView, cachedView, columnTable } from './table';
-import { CopyRequest, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, defaultFormat, pageSize, squeezeDefaults } from './tableHost';
+import { TableView, UNIVERSE, cachedView, columnTable, universeSymbol, universeTable } from './table';
+import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, defaultFormat, pageSize, saveChartImage, squeezeDefaults } from './tableHost';
 import { ExportItem, ExportOptions, SymbolViewState, buildSheets, connectInstructions } from './export';
 import { ViewStateStore } from './viewState';
 import { writeXlsx } from './xlsx';
@@ -22,6 +22,8 @@ type FromWebview =
   | { type: 'query'; name: string; query: WebviewQuery }
   | { type: 'columnValues'; name: string; column: number }
   | CopyRequest
+  | SelectionRequest
+  | ImageMessage
   | { type: 'action'; action: 'dumpSymbol' | 'exportCsv'; name: string }
   | { type: 'action'; action: 'refresh' | 'dumpAll' | 'compare' | 'settings' | 'showLog' };
 
@@ -35,6 +37,7 @@ class ViewerSession implements vscode.Disposable {
   private generation = 0;
   private reloadTimer?: NodeJS.Timeout;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly selection: SelectionTracker;
   selectedSymbol?: string;
   private loaded!: Promise<void>;
   private markLoaded!: () => void;
@@ -46,10 +49,12 @@ class ViewerSession implements vscode.Disposable {
     private readonly states: ViewStateStore,
   ) {
     this.loaded = new Promise((resolve) => (this.markLoaded = resolve));
+    this.selection = new SelectionTracker(service.selectionStatus, panel);
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(path.dirname(uri.fsPath)), path.basename(uri.fsPath)),
     );
     this.disposables.push(
+      this.selection,
       watcher,
       watcher.onDidChange(() => this.scheduleReload()),
       watcher.onDidCreate(() => this.scheduleReload()),
@@ -59,6 +64,9 @@ class ViewerSession implements vscode.Disposable {
         // Pages are formatted by the extension: ask the webview for the current page again.
         if (e.affectsConfiguration('gdx.numberFormat') || e.affectsConfiguration('gdx.squeezeDefaults') || e.affectsConfiguration('gdx.maxRowsPerPage') || e.affectsConfiguration('gdx.maxColumnsPerPage')) {
           panel.webview.postMessage({ type: 'requery' });
+        }
+        if (e.affectsConfiguration('gdx.encoding')) {
+          this.load();
         }
       }),
     );
@@ -152,6 +160,7 @@ class ViewerSession implements vscode.Disposable {
     const gen = ++this.generation;
     this.views.clear();
     this.uels = undefined;
+    this.selection.reset();
     try {
       const tools = this.service.tools();
       const info = await this.service.loadFile(this.uri.fsPath);
@@ -169,7 +178,7 @@ class ViewerSession implements vscode.Disposable {
         filePath: this.uri.fsPath,
         tools: describeTools(tools.tools),
         version: info.version,
-        symbols: info.symbols,
+        symbols: [universeSymbol(info.version), ...info.symbols],
         pageSize: pageSize(),
       });
     } catch (err) {
@@ -182,6 +191,13 @@ class ViewerSession implements vscode.Disposable {
   }
 
   private view(name: string): Promise<TableView> {
+    if (name === UNIVERSE && this.info) {
+      return cachedView(this.views, name, () => {
+        const view = this.loadUels().then((uels) => new TableView(universeTable(uels)));
+        view.catch(() => this.views.delete(name));
+        return view;
+      });
+    }
     const symbol = this.symbol(name);
     if (!symbol) {
       return Promise.reject(new Error(`Unknown symbol ${name}`));
@@ -197,19 +213,24 @@ class ViewerSession implements vscode.Disposable {
     });
   }
 
+  /** The unique elements of the file in GDX order. */
+  private loadUels(): Promise<string[]> {
+    if (!this.uels) {
+      this.uels = this.service
+        .tools()
+        .dump(this.uri.fsPath, { uelTable: 'uels', noData: true })
+        .then(parseUelTable);
+      this.uels.catch(() => (this.uels = undefined));
+    }
+    return this.uels;
+  }
+
   /** The view of a symbol with its labels in GDX order. */
   private async orderedView(name: string): Promise<TableView> {
     const view = await this.view(name);
     if (!this.ordered.has(view)) {
-      if (!this.uels) {
-        this.uels = this.service
-          .tools()
-          .dump(this.uri.fsPath, { uelTable: 'uels', noData: true })
-          .then(parseUelTable);
-        this.uels.catch(() => (this.uels = undefined));
-      }
       try {
-        view.setUelOrder(await this.uels);
+        view.setUelOrder(await this.loadUels());
         this.ordered.add(view);
       } catch (err) {
         // Fall back to the order in which labels appear.
@@ -234,7 +255,8 @@ class ViewerSession implements vscode.Disposable {
         this.selectedSymbol = m.name;
         const gen = this.generation;
         try {
-          const view = m.query.view === 'table' ? await this.orderedView(m.name) : await this.view(m.name);
+          // The table view and charts show labels in GDX order.
+          const view = m.query.view === 'table' || m.query.view === 'chart' ? await this.orderedView(m.name) : await this.view(m.name);
           if (gen === this.generation) {
             this.post({ type: 'page', name: m.name, page: answerQuery(view, m.query) });
           }
@@ -277,6 +299,10 @@ class ViewerSession implements vscode.Disposable {
             return vscode.commands.executeCommand('gdx.exportCsv', this.uri, m.name);
         }
         return;
+      case 'selection':
+        return this.selection.update(m, () => this.orderedView(m.name));
+      case 'image':
+        return saveChartImage(m, `${this.uri.fsPath.replace(/\.gdx$/i, '')}_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
       case 'copy':
         try {
           await copyToClipboard(await this.orderedView(m.name), m);

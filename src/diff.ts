@@ -5,7 +5,7 @@ import { dumpUri } from './dump';
 import { DiffSummary, GdxSymbol, parseDiffOutput, parseDomainInfo, parseSymbols } from './parse';
 import { GdxService, describeTools, errorMessage } from './service';
 import { TableView, cachedView, diffColumnTable } from './table';
-import { CopyRequest, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize } from './tableHost';
+import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage } from './tableHost';
 import { DiffOptions } from './tools';
 import { PROTOCOL, webviewHtml } from './webview';
 
@@ -25,6 +25,8 @@ type FromWebview =
   | { type: 'query'; name: string; query: WebviewQuery }
   | { type: 'columnValues'; name: string; column: number }
   | CopyRequest
+  | SelectionRequest
+  | ImageMessage
   | { type: 'action'; action: 'textDiff'; name?: string }
   | { type: 'action'; action: 'rerun' | 'swap' | 'openDiffFile' | 'saveDiffFile' | 'open1' | 'open2' | 'cancel' | 'resetOptions' }
   | { type: 'options'; options: DiffOptions };
@@ -73,6 +75,7 @@ export class DiffPanel implements vscode.Disposable {
   /** Options of this comparison: the settings until changed in the panel. */
   private options?: DiffOptions;
   private abort?: AbortController;
+  private readonly selection: SelectionTracker;
 
   static show(extensionUri: vscode.Uri, storage: vscode.Uri, service: GdxService, file1: string, file2: string) {
     for (const p of DiffPanel.panels) {
@@ -100,12 +103,19 @@ export class DiffPanel implements vscode.Disposable {
       localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
     });
     this.panel.webview.html = webviewHtml(this.panel.webview, extensionUri, 'diff.js', this.title());
+    this.selection = new SelectionTracker(service.selectionStatus, this.panel);
     this.disposables.push(
+      this.selection,
       this.panel.onDidDispose(() => this.dispose()),
       this.panel.webview.onDidReceiveMessage((m: FromWebview) => this.onMessage(m)),
       vscode.workspace.onDidChangeConfiguration((e) => {
         // Pages are formatted by the extension: ask the webview for the current page again.
         if (e.affectsConfiguration('gdx.numberFormat') || e.affectsConfiguration('gdx.squeezeDefaults') || e.affectsConfiguration('gdx.maxRowsPerPage') || e.affectsConfiguration('gdx.maxColumnsPerPage')) {
+          this.panel.webview.postMessage({ type: 'requery' });
+        }
+        if (e.affectsConfiguration('gdx.encoding')) {
+          // The labels are read again with the new encoding.
+          this.views = new Map();
           this.panel.webview.postMessage({ type: 'requery' });
         }
       }),
@@ -130,6 +140,7 @@ export class DiffPanel implements vscode.Disposable {
   async run() {
     const gen = ++this.generation;
     this.views = new Map();
+    this.selection.reset();
     this.panel.title = this.title();
     this.abort?.abort();
     const abort = (this.abort = new AbortController());
@@ -247,8 +258,9 @@ export class DiffPanel implements vscode.Disposable {
         try {
           const view = await this.view(m.name);
           if (gen === this.generation) {
-            // The difference view has no table view.
-            this.post({ type: 'page', name: m.name, page: answerQuery(view, { ...m.query, view: 'list' }) });
+            // The difference view has a list and a chart view, but no table view.
+            const query = m.query.view === 'chart' ? m.query : { ...m.query, view: 'list' as const };
+            this.post({ type: 'page', name: m.name, page: answerQuery(view, query) });
           }
         } catch (err) {
           if (gen === this.generation) {
@@ -318,6 +330,13 @@ export class DiffPanel implements vscode.Disposable {
           }
         }
         return;
+      case 'image': {
+        const name = (f: string) => path.basename(f).replace(/\.gdx$/i, '');
+        return saveChartImage(m, path.join(path.dirname(this.file1), `${name(this.file1)}_vs_${name(this.file2)}_${m.name}`), (err) => this.service.showError('Saving the chart image failed', err));
+      }
+      case 'selection':
+        // The difference view has no table view.
+        return this.selection.update({ ...m, query: { ...m.query, view: 'list' } }, () => this.view(m.name));
       case 'copy':
         try {
           // The difference view has no table view.

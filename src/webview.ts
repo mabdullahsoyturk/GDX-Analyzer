@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
  * they change incompatibly: after an update that was installed without reloading the
  * window, the old extension code still runs while webviews load the new scripts.
  */
-export const PROTOCOL = 6;
+export const PROTOCOL = 7;
 
 function nonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -16,7 +16,7 @@ function nonce(): string {
   return s;
 }
 
-/** HTML shell for a webview: loads media/common.css, media/table.js and the given script. */
+/** HTML shell for a webview: loads media/common.css, media/table.js, media/chart.js and the given script. */
 export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, script: string, title: string): string {
   const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', f));
   const n = nonce();
@@ -24,7 +24,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${n}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${n}'; img-src blob:;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="${media('common.css')}" rel="stylesheet">
 <title>${title.replace(/[<>&"]/g, '')}</title>
@@ -32,6 +32,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, s
 <body>
 <div id="app" data-protocol="${PROTOCOL}"><div class="placeholder">Loading…</div></div>
 <script nonce="${n}" src="${media('table.js')}"></script>
+<script nonce="${n}" src="${media('chart.js')}"></script>
 <script nonce="${n}" src="${media(script)}"></script>
 </body>
 </html>`;

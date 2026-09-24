@@ -76,3 +76,33 @@ describe('copyText', () => {
     assert.equal(highlighted.text.trim().split('\n').length, 7);
   });
 });
+
+describe('windows of rows (continuous scrolling)', () => {
+  const rows = Array.from({ length: 1000 }, (_, k) => [`r${k}`, `c${k % 3}`, String(k)]);
+  const view = () => new TableView(symbolTable({ columns: ['r', 'c', 'Value'], keyCount: 2, rows }));
+  const settings = { pageSize: 100, colPageSize: 10, defaultFormat: DEFAULT_FORMAT };
+
+  it('returns the rows from an offset, clamped to the rows, and echoes the sequence number', () => {
+    const a = answerQuery(view(), { offset: 250, seq: 7 }, settings);
+    assert.equal(a.kind, 'list');
+    assert.equal(a.seq, 7);
+    assert.equal(a.kind === 'list' && a.offset, 250);
+    assert.equal(a.kind === 'list' && a.rows[0].cells[0], 'r250');
+    const end = answerQuery(view(), { offset: 5000 }, settings);
+    assert.equal(end.kind === 'list' && end.offset, 999);
+  });
+
+  it('windows the rows of the table view', () => {
+    const a = answerQuery(view(), { view: 'table', rowDims: [0], colDims: [1], offset: 120 }, settings);
+    assert.equal(a.kind, 'pivot');
+    assert.equal(a.kind === 'pivot' && a.offset, 120);
+    assert.equal(a.kind === 'pivot' && a.rows[0].labels[0], 'r120');
+  });
+
+  it('moves the window to a match outside of it, and keeps it for a match inside', () => {
+    const far = answerQuery(view(), { offset: 0, search: { text: 'r777', exact: true }, findIndex: 0 }, settings);
+    assert.equal(far.kind === 'list' && far.offset, 777 - 25);
+    const near = answerQuery(view(), { offset: 0, search: { text: 'r42', exact: true }, findIndex: 0 }, settings);
+    assert.equal(near.kind === 'list' && near.offset, 0);
+  });
+});

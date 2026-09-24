@@ -74,17 +74,30 @@
     },
     onColumnValues: (column) => selected && vscode.postMessage({ type: 'columnValues', name: selected, column }),
     onCopy: (req) => selected && vscode.postMessage({ type: 'copy', name: selected, ...req }),
+    onSelection: (req) => selected && vscode.postMessage({ type: 'selection', name: selected, ...req }),
     onStateChange: () => save(),
     pivot: true,
+    chart: true,
+    onImage: (m) => selected && vscode.postMessage({ type: 'image', name: selected, ...m }),
+    imageInfo: () => {
+      const s = file && file.symbols.find((x) => x.name === selected);
+      return { title: s ? displaySignature(s) + (s.text ? ': ' + s.text : '') : selected || '', file: file ? file.fileName : '' };
+    },
   });
   // Actions on the whole symbol, shown in the symbol header.
+  const exportCsvButton = h('button', { title: 'Save all records of this symbol as CSV (gdxdump, without filters)', onclick: () => selected && action('exportCsv', { name: selected }) }, 'Export CSV…');
+  const dumpButton = h('button', { title: 'Open the gdxdump output of this symbol', onclick: () => selected && action('dumpSymbol', { name: selected }) }, 'gdxdump');
   const symbolActions = h(
     'div',
     { class: 'actions' },
     h('button', { title: 'Copy the selected cells, or all filtered records, as tab separated text with exact values (right-click cells for more)', onclick: () => table.copy('tab', true, true) }, 'Copy'),
-    h('button', { title: 'Save all records of this symbol as CSV (gdxdump, without filters)', onclick: () => selected && action('exportCsv', { name: selected }) }, 'Export CSV…'),
-    h('button', { title: 'Open the gdxdump output of this symbol', onclick: () => selected && action('dumpSymbol', { name: selected }) }, 'gdxdump'),
+    exportCsvButton,
+    dumpButton,
   );
+  /** The symbols of the file without the universe (the list of unique elements). */
+  const realSymbols = () => file.symbols.filter((s) => !s.universe);
+  /** Like signature(), but the universe is just "*". */
+  const displaySignature = (s) => (s.universe ? s.name : signature(s));
 
   // Like GAMS Studio: only the name is searched unless "all columns" is on.
   const symbolSearch = searchBox({
@@ -165,19 +178,21 @@
   function openExport() {
     if (!file || !exportButton) return;
     const last = saved.exportOptions || {};
-    const chosen = new Set(last.names && last.names.length ? last.names.filter((n) => symbolFields.has(n)) : selected ? [selected] : []);
+    const exportable = (n) => symbolFields.has(n) && n !== '*';
+    const chosen = new Set(last.names && last.names.length ? last.names.filter(exportable) : selected && exportable(selected) ? [selected] : []);
     const search = h('input', { type: 'search', placeholder: 'Filter symbols…', 'aria-label': 'Filter symbols' });
     const list = h('div', { class: 'labels export-symbols', role: 'group', 'aria-label': 'Symbols' });
     const counter = h('span', { class: 'muted' });
     const boxes = new Map();
-    for (const s of file.symbols) {
+    const symbols = realSymbols();
+    for (const s of symbols) {
       const box = h('input', { type: 'checkbox', onchange: () => (box.checked ? chosen.add(s.name) : chosen.delete(s.name), sync()) });
       box.checked = chosen.has(s.name);
       boxes.set(s.name, box);
       list.append(h('label', { class: 'label-item', dataset: { name: s.name.toLowerCase() }, title: s.text || '' }, box, h('span', null, s.name), h('span', { class: 'muted' }, ' ' + typeLabel(s))));
     }
     const sync = () => {
-      counter.textContent = chosen.size + ' of ' + file.symbols.length + ' selected';
+      counter.textContent = chosen.size + ' of ' + symbols.length + ' selected';
       exportBtn.disabled = connectBtn.disabled = chosen.size === 0;
     };
     search.addEventListener('input', () => {
@@ -208,7 +223,7 @@
         includeHidden: includeHidden.checked,
         specials: Object.fromEntries(specialInputs.map((x) => [x.key, x.input.value])),
       };
-      const names = file.symbols.map((s) => s.name).filter((n) => chosen.has(n));
+      const names = symbols.map((s) => s.name).filter((n) => chosen.has(n));
       // The views of the symbols: the current one from the table, the others as saved.
       save();
       const viewStates = {};
@@ -240,7 +255,7 @@
   }
 
   function symbolTitle(s) {
-    return `${typeLabel(s)} ${signature(s)}${s.text ? '\n' + s.text : ''}${s.type === 'Alias' ? '' : `\n${fmt.format(s.records)} records`}`;
+    return `${typeLabel(s)} ${displaySignature(s)}${s.text ? '\n' + s.text : ''}${s.type === 'Alias' ? '' : `\n${fmt.format(s.records)} records`}`;
   }
 
   function symbolRow(s) {
@@ -260,7 +275,7 @@
         },
       },
       h('td', { class: 'num' }, s.entry !== undefined ? String(s.entry) : ''),
-      h('td', { class: 'name' }, s.name, s.dim ? h('span', { class: 'dom' }, `(${s.domain.join(',')})`) : null),
+      h('td', { class: 'name' }, s.name, s.dim && !s.universe ? h('span', { class: 'dom' }, `(${s.domain.join(',')})`) : null),
       h('td', { class: 'type' }, typeLabel(s)),
       h('td', { class: 'num' }, String(s.dim)),
       // gdxdump reports 0 records for aliases.
@@ -328,7 +343,7 @@
       'div',
       { class: 'header' },
       h('span', { class: 'title' }, file.fileName),
-      h('span', { class: 'sub', title: file.filePath }, `${fmt.format(file.symbols.length)} symbols · ${file.tools}`),
+      h('span', { class: 'sub', title: file.filePath }, `${fmt.format(realSymbols().length)} symbols · ${file.tools}`),
       h(
         'div',
         { class: 'actions' },
@@ -358,8 +373,8 @@
     const current = file.symbols.find((s) => s.name === selected);
     if (current) {
       select(current.name, true);
-    } else if (file.symbols.length) {
-      select(file.symbols[0].name);
+    } else if (realSymbols().length) {
+      select(realSymbols()[0].name);
     } else {
       symHead.replaceChildren();
       table.showMessage('This GDX file contains no symbols.');
@@ -379,12 +394,13 @@
     }
     fill(
       symHead,
-      h('span', { class: 'sig' }, signature(s)),
+      h('span', { class: 'sig' }, displaySignature(s)),
       h('span', { class: 'badge' }, typeLabel(s)),
       h('span', { class: 'desc' }, s.text || ''),
       s.domainType && s.domainType !== 'None' ? h('span', { class: 'badge', title: 'Domain checking' }, `${s.domainType} domain`) : null,
       symbolActions,
     );
+    exportCsvButton.hidden = dumpButton.hidden = !!s.universe;
     if (changed) table.reset(stateOf(name));
     table.setDimension(s.dim);
     table.query();

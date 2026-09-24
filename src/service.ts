@@ -1,17 +1,18 @@
 import * as vscode from 'vscode';
-import { GdxSymbol, SymbolColumns, mergeDomainInfo, mergeSubtypes, parseDomainInfo, parseSubtypes, parseSymbolStream, parseSymbols, parseVersionInfo } from './parse';
+import { GdxFileInfo, loadFileInfo, loadSymbolColumns } from './gdxFile';
+import { GdxSymbol, SymbolColumns } from './parse';
+import { SelectionStatus } from './selectionStatus';
 import { BackendSetting, GdxTools, ResolvedTools, ToolNotFoundError, resolveTools } from './tools';
 
-export interface GdxFileInfo {
-  version: [string, string][];
-  symbols: GdxSymbol[];
-}
+export type { GdxFileInfo } from './gdxFile';
 
 /** Shared access to the resolved gdxdump/gdxdiff tools and common GDX queries. */
 export class GdxService implements vscode.Disposable {
   readonly output = vscode.window.createOutputChannel('GDX');
+  /** Statistics of the selected cells of the active viewer or comparison. */
+  readonly selectionStatus = new SelectionStatus();
   private cached?: GdxTools;
-  private readonly disposables: vscode.Disposable[] = [this.output];
+  private readonly disposables: vscode.Disposable[] = [this.output, this.selectionStatus];
 
   constructor() {
     this.disposables.push(
@@ -42,34 +43,20 @@ export class GdxService implements vscode.Disposable {
         gamspyExecutable: cfg.get<string>('gamspyExecutable', ''),
         venvSearchRoots: (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath),
       });
-      this.log(`Using ${describeTools(resolved)}`);
-      this.cached = new GdxTools(resolved, (l) => this.log(l));
+      const encoding = cfg.get<string>('encoding', 'utf-8').trim() || 'utf-8';
+      this.log(`Using ${describeTools(resolved)}${encoding.toLowerCase().replace('-', '') === 'utf8' ? '' : `, reading GDX labels as ${encoding}`}`);
+      this.cached = new GdxTools(resolved, (l) => this.log(l), encoding);
     }
     return this.cached;
   }
 
-  async loadFile(file: string): Promise<GdxFileInfo> {
-    const tools = this.tools();
-    // In parallel, since each GAMSPy CLI call pays for a Python interpreter start-up.
-    const [symbolsText, domainText, versionText, declarations] = await Promise.all([
-      tools.dump(file, { symbols: true }),
-      tools.dump(file, { domainInfo: true }),
-      tools.dump(file, { version: true }),
-      // The declarations contain the variable subtypes and singleton sets.
-      tools.dump(file, { noData: true }),
-    ]);
-    const symbols = mergeSubtypes(mergeDomainInfo(parseSymbols(symbolsText), parseDomainInfo(domainText)), parseSubtypes(declarations));
-    return { version: parseVersionInfo(versionText), symbols };
+  loadFile(file: string): Promise<GdxFileInfo> {
+    return loadFileInfo(this.tools(), file);
   }
 
-  /**
-   * The records of a symbol in compact columns, parsed while gdxdump writes them (so that
-   * symbols with millions of records fit into memory); hexBytes gives the exact values.
-   */
-  async loadSymbolColumns(file: string, symbol: GdxSymbol): Promise<SymbolColumns> {
-    const parser = parseSymbolStream(symbol);
-    await this.tools().dumpStream(file, { symbol: symbol.name, format: 'csv', csvAllFields: true, csvSetText: true, dFormat: 'hexBytes' }, parser.push);
-    return parser.finish();
+  /** The records of a symbol in compact columns (see gdxFile.ts). */
+  loadSymbolColumns(file: string, symbol: GdxSymbol): Promise<SymbolColumns> {
+    return loadSymbolColumns(this.tools(), file, symbol);
   }
 
   /** Shows an error; offers to open the settings when the tools could not be found. */

@@ -9,13 +9,22 @@ files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a 
 - **GDX viewer**: `.gdx` files open in a read-only viewer with a symbol table like GAMS Studio's: entry
   number, name and domain, type including the subtype (e.g. *Positive Variable*, *Singleton Set*), dimension,
   records and explanatory text. Click a column header to sort; *Group by type* shows one table per type. Selecting a symbol shows its
-  records in a table that you can sort, filter and page through. Like GAMS Studio, set elements without
+  records in a table that you can sort, filter and scroll through continuously (the records are loaded while
+  scrolling, so symbols with millions of records stay fast; arrow keys, PageUp/PageDown and Ctrl+Home/End move
+  through all of them). Like GAMS Studio, set elements without
   explanatory text show "Y". Variables and equations show level, marginal,
   lower, upper and scale. Special values (`Eps`, `NA`, `+Inf`, `-Inf`, `Undf`) are highlighted and sort correctly.
   The viewer reloads automatically when the file changes, e.g. after a GAMS run. It remembers the view of
   each symbol (filters, sorting, fields, layout, number format, column widths), also after the file is closed,
   as long as the symbol's type and dimension stay the same; *GDX: Reset Viewer State* (also in the Explorer
   context menu) forgets it.
+- **Universe**: like GAMS Studio, the first entry of the symbol table (`*`, entry 0) lists all unique
+  elements (UELs) of the file in GDX order with their UEL numbers. It can be sorted, filtered, searched and
+  copied like any symbol.
+- **Encoding**: GDX files store labels and explanatory texts as the bytes GAMS wrote, so a file created from
+  sources in a legacy encoding (e.g. Latin-1) shows wrong characters when read as UTF-8. Set `gdx.encoding`, or
+  use *GDX: Select Encoding of Labels…*, to read them in another encoding; open viewers, comparisons and
+  gdxdump documents are read again.
 - **Squeeze defaults**: *Fields* can hide the fields of variables and equations that have their default value
   in every record (for the variable type, e.g. an upper bound of 1 for binary variables). gdxdump does not
   report equation types, so for equations the type is inferred from the bounds of the records.
@@ -28,10 +37,20 @@ files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a 
   the others as columns (by default the last one). Drag the dimension chips between *Rows* and *Columns* to
   rearrange them (or press Enter on a chip to move it, Alt+←/→ to reorder), or swap rows and columns with ⇄.
   Labels are in the order of the GDX file. For variables and equations the fields (level, marginal, ...) form
-  the last column level; use *Fields* to hide some of them. Rows and columns are paged.
+  the last column level; use *Fields* to hide some of them. Rows scroll continuously; very wide tables page their columns.
+- **Charts**: *Chart* (next to *List* and *Table*) shows the filtered records as horizontal **bars** (compare
+  magnitudes), **lines** (trends along an ordered dimension such as time) or a **heatmap** (two dimensions).
+  Choose the dimension along the category axis, the series (one per label) and, for variables and equations,
+  the field. Other dimensions are summed, EPS counts as 0, and NA, ±INF and UNDF are left out; notes above the
+  chart say so. Labels are in GDX order. Bar and line charts show up to 8 series (the others are summed as
+  *Other*) and 500 categories; hovering (or the arrow keys) shows the exact values. Colors follow the VS Code
+  theme (light or dark) and are colorblind-safe; a heatmap uses one hue, or blue and red around 0 when values
+  have both signs. *Image* saves the chart as PNG (at twice the resolution) or SVG, or copies it as PNG, with
+  the symbol, what is plotted, the file name and the notes as a title; the whole chart is included, also the
+  part scrolled out of view.
 - **Search**: the search field above the records highlights all matches (in the table view also row labels
   and column headers); **Enter/F3** and **Shift+Enter/Shift+F3** go to the next and previous match, changing
-  pages as needed. Like GAMS Studio, the search is case-insensitive and has toggles for an **exact match** of
+  scrolling as needed. Like GAMS Studio, the search is case-insensitive and has toggles for an **exact match** of
   the whole cell and for **regular expressions** (otherwise `*` and `?` are wildcards). A third toggle
   **filters rows** instead of highlighting. Numbers are matched as displayed. The symbol list has the same
   search; it searches names only unless **all columns** (type, domain and explanatory text) is on. **Ctrl+F**
@@ -49,7 +68,7 @@ files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a 
   rounded value shows it exactly.
 - **gdxdump output**: *GDX: Dump to Text* opens the gdxdump output of the whole file, and *GDX: Dump Symbol to
   Text* opens the output for one symbol. Both are read-only documents that refresh when the GDX file changes.
-- **Selecting and copying**: click and drag (or Shift+click, also across pages) to select cells; click row
+- **Selecting and copying**: click and drag (or Shift+click, also far apart) to select cells; click row
   numbers, row labels or column headers to select whole rows or columns; use the arrow keys (Shift extends),
   Ctrl+A to select everything and Escape to clear. **Ctrl+C** copies the selection tab-separated, which pastes
   into Excel; right-click for comma-separated copies and, in the table view, copies without row and column
@@ -57,6 +76,10 @@ files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a 
   only the visible page. The decimal separator of copied numbers is configurable. (GAMS Studio uses
   Ctrl+Shift+C for tab-separated copies; in VS Code that opens an external terminal, so the extension uses
   Ctrl+C for them.) *Copy* in the header copies the selection, or everything if nothing is selected.
+- **Selection statistics**: like a spreadsheet, the status bar shows *Sum*, *Average* and *Count* of the numbers
+  in the selected cells (two or more) of the viewer and the comparison view; its tooltip adds the minimum, the
+  maximum and the number of special values, which are not counted as numbers. The statistics use the exact
+  values of all selected cells, also those scrolled out of view, and are shown in the number format of the view.
 - **Export to Excel**: *Export…* in the viewer (or *GDX: Export to Excel…*) writes the chosen symbols to an
   `.xlsx` file, one sheet per symbol, laid out like its view (list or table view) with exact values. Options:
   apply the filters of each symbol, include hidden fields, and how special values are written (e.g. EPS as 0).
@@ -71,13 +94,41 @@ files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a 
   or of one symbol. The difference GDX written by gdxdiff can be opened or saved. *Options…* sets all gdxdiff
   options for a comparison (tolerances, field, field only, diff only, ignoring set texts, comparing
   defaults or domains, ignoring the UEL order, comparing only or skipping symbols); the defaults come from the
-  settings. A running comparison can be cancelled.
+  settings. A running comparison can be cancelled. *Chart* shows the differences of a symbol like the viewer's
+  charts: by default the differences (Δ = file 2 − file 1) as bars colored by their sign (blue: higher in
+  file 2, red: lower), or the values of both files side by side (*Value: … file 1 and file 2*), or a heatmap of
+  the differences over two dimensions; charts can be saved as images here too.
+
+- **AI agents (MCP)**: the extension includes an MCP server that gives AI agents read-only access to GDX
+  files, see [AI agents](#ai-agents-mcp).
 
 ### Ways to compare
 
 - Select two `.gdx` files in the Explorer → right-click → *Compare GDX Files (gdxdiff)*
 - Right-click a file → *Select for GDX Compare*, then right-click another → *Compare with Selected GDX*
 - *Compare…* in the viewer, or *GDX: Compare GDX Files* from the Command Palette
+
+### AI agents (MCP)
+
+The extension includes an [MCP](https://modelcontextprotocol.io) server with read-only tools for GDX files, so
+that AI agents can inspect model data and solutions without parsing gdxdump output:
+
+| Tool | What it does |
+| --- | --- |
+| `gdx_list_symbols` | Symbols of a file: name, type (e.g. *Positive Variable*), dimension, domain, records, text |
+| `gdx_read_symbol` | Records of a symbol as CSV with exact values: filters by label or value range, text search, sorting, fields, paging. `*` reads the universe |
+| `gdx_symbol_stats` | Per dimension the distinct labels, per value column count, sum, mean, min, max, zeros and special values |
+| `gdx_compare` | gdxdiff of two files: the differing symbols, or the differing records of one symbol with both values and their difference |
+
+- **VS Code chat**: the server is registered with VS Code (*GDX* in the MCP server list), so agent mode can use it
+  directly. It uses the same tools (GAMS or GAMSPy) and encoding as the viewer.
+- **Other agents** (Claude Code, Cursor, Claude Desktop, ...): *GDX: Copy MCP Server Configuration for AI
+  Agents…* copies a `claude mcp add` command or a JSON `mcpServers` entry. The server runs with Node.js
+  (`node <extension>/out/mcp.js`) and reads `GDX_BACKEND`, `GDX_GAMS_SYSTEM_DIRECTORY`, `GDX_GAMSPY_EXECUTABLE` and
+  `GDX_ENCODING` from its environment. The path contains the extension version, so copy the configuration again
+  after updating the extension.
+
+Relative file paths are resolved against the server's working directory (the first workspace folder in VS Code).
 
 ### Sample files
 
@@ -86,7 +137,7 @@ files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a 
 
 ## Requirements
 
-One of:
+VS Code 1.101 or later, and one of:
 
 - A **GAMS** installation. The extension looks in `gdx.gamsSystemDirectory`, then the `PATH`, then the standard
   install locations (`C:\GAMS\<version>` on Windows, `/Library/Frameworks/GAMS.framework/...` on macOS,
@@ -105,7 +156,8 @@ logs every command the extension runs.
 | `gdx.backend`             | `auto`  | `auto`, `gams` (gdxdump/gdxdiff) or `gamspy` (GAMSPy CLI)            |
 | `gdx.gamsSystemDirectory` |         | GAMS system directory containing gdxdump and gdxdiff                 |
 | `gdx.gamspyExecutable`    |         | Path to the `gamspy` executable (or to a virtual environment)        |
-| `gdx.maxRowsPerPage`      | `500`   | Records (list view) or rows (table view) per page                    |
+| `gdx.encoding`            | `utf-8` | Encoding of labels and texts in GDX files, e.g. `windows-1252`      |
+| `gdx.maxRowsPerPage`      | `500`   | Records (list view) or rows (table view) loaded at once while scrolling |
 | `gdx.maxColumnsPerPage`   | `100`   | Columns per page in the table view                                   |
 | `gdx.numberFormat.style`  | `g`     | Default number format: `g` (automatic), `f` (fixed), `e` (scientific) |
 | `gdx.numberFormat.precision` | `6` | Significant digits (`g`, `e`: 1-17) or decimals (`f`: 0-14)        |

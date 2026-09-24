@@ -61,6 +61,26 @@
     };
   }
 
+  /** Until then, text selections of the page (outside of inputs) are removed. */
+  let suppressSelectionUntil = 0;
+  let selectionListener = false;
+  /** Removes the page text selection that VS Code's "select all" makes after Ctrl+A in a table. */
+  function suppressPageSelection() {
+    suppressSelectionUntil = Date.now() + 500;
+    if (!selectionListener) {
+      selectionListener = true;
+      document.addEventListener('selectionchange', () => {
+        if (Date.now() > suppressSelectionUntil) return;
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed) sel.removeAllRanges();
+      });
+    }
+    const sel = window.getSelection();
+    if (sel) sel.removeAllRanges();
+  }
+
   const fmt = new Intl.NumberFormat();
   const plural = (n, word) => `${fmt.format(n)} ${word}${n === 1 ? '' : 's'}`;
 
@@ -472,6 +492,25 @@
 
   // Table -------------------------------------------------------------------
 
+  /** Tables taller than this (in pixels) scroll proportionally: browsers limit the height of elements. */
+  const MAX_SCROLL_PX = 15000000;
+
+  /** ChartSpec.series of src/table.ts: the value columns of `fields` are the series. */
+  const FIELD_SERIES = -2;
+
+  /** The contents of a Blob as base64. */
+  function base64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /** Names of special values in notes, like the filters show them. */
+  const SPECIAL_LABEL = { eps: 'EPS', na: 'NA', pinf: '+INF', minf: '-INF', undf: 'UNDF' };
+
   const DEFAULT_STATE = () => ({
     search: { text: '' },
     columnFilters: [],
@@ -488,6 +527,8 @@
     colWidths: {},
     /** Column order of the list view (all column indexes), undefined for the natural order. */
     order: undefined,
+    /** Chart view: { type, x, series, value } (see ChartSpec in src/table.ts); the host's defaults if undefined. */
+    chart: undefined,
   });
 
   /**
@@ -497,11 +538,17 @@
    */
   class GdxTable {
     /**
-     * @param {{ onQuery: (q: any) => void, onColumnValues: (column: number) => void, onCopy: (req: any) => void, tools?: Node[], filterPlaceholder?: string, pivot?: boolean }} options
+     * @param {{ onQuery: (q: any) => void, onColumnValues: (column: number) => void, onCopy: (req: any) => void, onSelection?: (req: any) => void, onImage?: (m: any) => void, imageInfo?: () => { title: string, file: string }, tools?: Node[], filterPlaceholder?: string, pivot?: boolean, chart?: boolean }} options
      */
     constructor(options) {
       this.onQuery = options.onQuery;
       this.onCopy = options.onCopy;
+      /** Called (debounced) when the selected cells change, for the statistics in the status bar. */
+      this.onSelection = options.onSelection;
+      this.selectionKey = '';
+      this.sendSelection = debounce(() => {
+        if (this.onSelection) this.onSelection({ selection: this.selectionRequest(), query: JSON.parse(JSON.stringify(this.state)) });
+      }, 150);
       /** Called when the state changed without a query (e.g. column widths). */
       this.onStateChange = options.onStateChange || (() => {});
       this.lastPage = null;
@@ -515,6 +562,25 @@
       this.lastCopy = 0;
       this.onColumnValues = options.onColumnValues;
       this.pivotSupported = !!options.pivot;
+      this.chartSupported = !!options.chart;
+      // Continuous scrolling: the rows of a window (from the host) between two spacer rows.
+      /** Sequence number of the last query: answers to older ones are dropped. */
+      this.seq = 0;
+      /** The first row of the window to ask for. */
+      this.windowOffset = 0;
+      /** The rendered window: { offset, count, total } (rows of the list or pivot rows). */
+      this.win = null;
+      /** Height of a row in pixels (measured after rendering). */
+      this.rowH = 22;
+      /** 'top': scroll to the top after rendering the next window (else the visible rows stay in place). */
+      this.anchor = 'top';
+      /** A row to scroll into view once its window is loaded (keyboard navigation to rows far away). */
+      this.revealRow = undefined;
+      /** Widest width seen per column (by width key) while scrolling, so that columns do not shrink. */
+      this.seenWidths = {};
+      /** Chart images: `onImage({ format: 'png' | 'svg', data })` saves one, `onImage({ format: 'notice', text, error })` reports. */
+      this.onImage = options.onImage || (() => {});
+      this.imageInfo = options.imageInfo || (() => ({ title: '', file: '' }));
       this.state = DEFAULT_STATE();
       this.columns = [];
       this.dims = 0;
@@ -556,7 +622,8 @@
       this.selLabel = h('span', { class: 'count sel-count' });
       this.listButton = h('button', { class: 'seg', 'aria-pressed': 'true', title: 'One row per record', onclick: () => this.setView('list') }, 'List');
       this.tableButton = h('button', { class: 'seg', 'aria-pressed': 'false', title: 'Rows and columns by dimension', onclick: () => this.setView('table') }, 'Table');
-      this.viewToggle = h('span', { class: 'segmented', role: 'group', 'aria-label': 'View' }, this.listButton, this.tableButton);
+      this.chartButton = h('button', { class: 'seg', 'aria-pressed': 'false', title: 'Bar, line or heatmap chart of the filtered records', onclick: () => this.setView('chart') }, 'Chart');
+      this.viewToggle = h('span', { class: 'segmented', role: 'group', 'aria-label': 'View' }, this.listButton, this.tableButton, this.chartButton);
       this.fieldsButton = h('button', { title: 'Choose the fields to show', onclick: () => this.openFields() }, 'Fields ▾');
       this.formatButton = h('button', { title: 'Number format and precision', onclick: () => this.openFormat() }, 'Format ▾');
       this.clearButton = h('button', { title: 'Remove all column filters', onclick: () => this.clearFilters() }, 'Clear filters');
@@ -588,6 +655,28 @@
       );
       this.updateToolbar();
       this.installSelection();
+      let scrollFrame = 0;
+      this.scroll.addEventListener(
+        'scroll',
+        () => {
+          if (!scrollFrame) scrollFrame = requestAnimationFrame(() => ((scrollFrame = 0), this.onScroll()));
+        },
+        { passive: true },
+      );
+      // Charts are drawn for the width of the view: draw them again when it (or the theme) changes.
+      let lastWidth = 0;
+      const redraw = debounce(() => {
+        if (this.lastPage && this.lastPage.kind === 'chart') this.drawChart(this.lastPage);
+      }, 120);
+      new ResizeObserver(() => {
+        const w = this.scroll.clientWidth;
+        if (w !== lastWidth) {
+          lastWidth = w;
+          redraw();
+        }
+        this.onScroll();
+      }).observe(this.scroll);
+      new MutationObserver(redraw).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     }
 
     // Cell selection and copying ----------------------------------------------
@@ -680,7 +769,13 @@
           curEl = el;
         }
       }
-      if (curEl) curEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (curEl) {
+        // A match further away is centered; one already on screen only scrolls as little as needed.
+        const box = curEl.getBoundingClientRect();
+        const view = this.scroll.getBoundingClientRect();
+        const onScreen = box.top >= view.top && box.bottom <= view.bottom;
+        curEl.scrollIntoView({ block: onScreen ? 'nearest' : 'center', inline: 'nearest' });
+      }
       this.findLabel.textContent = info.error
         ? 'Invalid expression'
         : !info.count
@@ -708,8 +803,8 @@
       if (!this.extent.rows || !this.extent.cols) return;
       this.sel = { all: true };
       this.paintSelection();
-      // VS Code may also run "select all" on the page's text.
-      setTimeout(() => window.getSelection() && window.getSelection().removeAllRanges(), 0);
+      // VS Code also runs its own "select all" on the page's text, shortly after the key press.
+      suppressPageSelection();
     }
 
     /** The selection as sent to the extension (whole-view positions). */
@@ -758,6 +853,17 @@
         count = all ? ext.rows * ext.cols : (Math.abs(a.r - f.r) + 1) * (Math.abs(a.c - f.c) + 1);
       }
       this.selLabel.textContent = !this.sel ? '' : this.sel.all ? '· all ' + fmt.format(count) + ' cells selected' : count > 1 ? '· ' + fmt.format(count) + ' cells selected' : '';
+      this.notifySelection();
+    }
+
+    /** Reports the selection if it (or the view it applies to, e.g. the sorting) changed. */
+    notifySelection() {
+      const req = this.selectionRequest();
+      const { colWidths, ...view } = this.state;
+      const key = req ? JSON.stringify([req, view]) : '';
+      if (key === this.selectionKey) return;
+      this.selectionKey = key;
+      this.sendSelection();
     }
 
     onTableKey(e) {
@@ -776,20 +882,35 @@
         this.select(null);
         return;
       }
-      const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], Home: [0, -Infinity], End: [0, Infinity] };
+      const v = this.visibleRows();
+      const pageRows = v ? Math.max(1, v.last - v.first) : 20;
+      const moves = {
+        ArrowUp: [-1, 0],
+        ArrowDown: [1, 0],
+        ArrowLeft: [0, -1],
+        ArrowRight: [0, 1],
+        Home: mod ? [-Infinity, 0] : [0, -Infinity],
+        End: mod ? [Infinity, 0] : [0, Infinity],
+        PageUp: [-pageRows, 0],
+        PageDown: [pageRows, 0],
+      };
       const move = moves[e.key];
       if (!move) return;
       e.preventDefault();
       const ext = this.extent;
       if (ext.r1 < ext.r0 || ext.c1 < ext.c0) return;
       const from = this.sel && this.sel.focus ? this.sel.focus : null;
-      const clampR = (r) => Math.min(ext.r1, Math.max(ext.r0, r));
+      // Rows of the whole view (other windows are loaded by scrolling); columns of this column page.
+      const clampR = (r) => Math.min(ext.rows - 1, Math.max(0, r));
       const clampC = (c) => Math.min(ext.c1, Math.max(ext.c0, c));
-      const focus = from ? { r: clampR(from.r + move[0]), c: clampC(from.c + move[1]) } : { r: ext.r0, c: ext.c0 };
+      const focus = from ? { r: clampR(from.r + move[0]), c: clampC(from.c + move[1]) } : { r: v ? v.first : ext.r0, c: ext.c0 };
       const anchor = e.shiftKey && this.sel && this.sel.anchor ? this.sel.anchor : focus;
       this.select(anchor, focus);
       const el = this.cellMap.get(focus.r + ',' + focus.c);
       if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      // Keep it below the sticky header; a row outside the window is shown once its window is loaded.
+      this.revealRow = el ? undefined : focus.r;
+      this.scrollToRow(focus.r);
     }
 
     openContextMenu(x, y) {
@@ -1004,6 +1125,7 @@
       this.searchInfo = null;
       this.columns = [];
       this.sel = null;
+      this.notifySelection();
       this.shapeKey = undefined;
       this.updateToolbar();
     }
@@ -1011,7 +1133,7 @@
     /** The number of dimensions of the shown symbol; the table view needs at least two. */
     setDimension(n) {
       this.dims = n;
-      if (this.state.view === 'table' && !this.canPivot()) this.state.view = 'list';
+      if ((this.state.view === 'table' && !this.canPivot()) || (this.state.view === 'chart' && !this.canChart())) this.state.view = 'list';
       this.updateToolbar();
     }
 
@@ -1019,16 +1141,169 @@
       return this.pivotSupported && this.dims >= 2;
     }
 
+    /** Charts need a dimension and numbers (unknown until the first page: then assumed). */
+    canChart() {
+      return this.chartSupported && this.dims >= 1 && (!this.columns.length || this.columns.some((c) => c.kind === 'value'));
+    }
+
     query() {
       if (this.shapeChanged()) {
         this.sel = null;
         this.findCurrent = undefined;
+        // Other rows: start at the top again.
+        this.windowOffset = 0;
+        this.anchor = 'top';
+        this.seenWidths = {};
       }
       this.el.classList.add('loading');
+      this.send();
+    }
+
+    /** Asks the host for the current state and window (the answer arrives through show()). */
+    send() {
       const q = JSON.parse(JSON.stringify(this.state));
       if (this.pendingFind !== undefined) q.findIndex = this.pendingFind;
       this.pendingFind = undefined;
+      q.offset = this.windowOffset;
+      q.seq = ++this.seq;
       this.onQuery(q);
+    }
+
+    // Continuous scrolling ---------------------------------------------------
+
+    /** Scale of the rows outside the window: tables taller than MAX_SCROLL_PX are mapped onto that height. */
+    scrollScale() {
+      const full = this.win.total * this.rowH;
+      return full > MAX_SCROLL_PX ? MAX_SCROLL_PX / full : 1;
+    }
+
+    /** The top of a row, relative to the first row of the body (rows outside the window are scaled). */
+    rowTop(r) {
+      const { offset, count } = this.win;
+      const k = this.scrollScale();
+      const top = offset * this.rowH * k;
+      if (r < offset) return r * this.rowH * k;
+      if (r < offset + count) return top + (r - offset) * this.rowH;
+      return top + count * this.rowH + (r - offset - count) * this.rowH * k;
+    }
+
+    /** The row at a position relative to the first row of the body. */
+    rowAt(y) {
+      const { offset, count, total } = this.win;
+      const k = this.scrollScale();
+      const top = offset * this.rowH * k;
+      let r;
+      if (y < top) r = Math.floor(y / (this.rowH * k));
+      else if (y < top + count * this.rowH) r = offset + Math.floor((y - top) / this.rowH);
+      else r = offset + count + Math.floor((y - top - count * this.rowH) / (this.rowH * k));
+      return Math.max(0, Math.min(total - 1, r));
+    }
+
+    /** Where the body starts in the scrolled content, and the height of the sticky header. */
+    bodyGeometry() {
+      const body = this.scroll.querySelector('tbody');
+      const head = this.scroll.querySelector('thead');
+      if (!body) return null;
+      const box = this.scroll.getBoundingClientRect();
+      return { top: body.getBoundingClientRect().top - box.top + this.scroll.scrollTop, head: head ? head.offsetHeight : 0 };
+    }
+
+    /** The rows visible below the sticky header. */
+    visibleRows() {
+      const g = this.bodyGeometry();
+      if (!g || !this.win || !this.win.total) return null;
+      const y0 = this.scroll.scrollTop + g.head - g.top;
+      const y1 = this.scroll.scrollTop + this.scroll.clientHeight - g.top;
+      const first = this.rowAt(Math.max(0, y0));
+      return { first, last: this.rowAt(Math.max(0, y1 - 1)), delta: y0 - this.rowTop(first) };
+    }
+
+    /** Loads another window when the visible rows come near the edge of the rendered one. */
+    onScroll() {
+      const p = this.lastPage;
+      if (!p || (p.kind !== 'list' && p.kind !== 'pivot') || !this.win) return;
+      const { offset, count, total } = this.win;
+      if (count >= total) return;
+      const v = this.visibleRows();
+      if (!v) return;
+      const visible = v.last - v.first + 1;
+      const margin = Math.max(20, visible);
+      const nearTop = offset > 0 && v.first < offset + margin;
+      const nearEnd = offset + count < total && v.last > offset + count - 1 - margin;
+      if (!nearTop && !nearEnd) return;
+      // Centered on the visible rows.
+      const want = Math.max(0, Math.min(total - count, v.first - Math.floor((count - visible) / 2)));
+      if (want === this.windowOffset) return;
+      this.windowOffset = want;
+      this.send();
+    }
+
+    /** Scrolls so that a row is visible (loading its window if needed). */
+    scrollToRow(r) {
+      const g = this.bodyGeometry();
+      if (!g || !this.win) return;
+      const y = g.top + this.rowTop(r);
+      const view0 = this.scroll.scrollTop + g.head;
+      const view1 = this.scroll.scrollTop + this.scroll.clientHeight;
+      if (y < view0) this.scroll.scrollTop = y - g.head;
+      else if (y + this.rowH > view1) this.scroll.scrollTop = y + this.rowH - this.scroll.clientHeight;
+    }
+
+    /** A spacer row standing in for rows outside the window. */
+    spacer(cols, height) {
+      const td = h('td', { colspan: cols });
+      td.style.height = Math.max(0, height) + 'px';
+      return h('tr', { class: 'spacer', 'aria-hidden': 'true' }, td);
+    }
+
+    /**
+     * Places the window between spacers of the right heights once it is rendered: measures the
+     * row height, keeps the rows that were visible (`keep`, from visibleRows() before rendering)
+     * in place or goes to the top, and keeps column widths.
+     */
+    placeWindow(table, body, offset, count, total, top, bottom, keep) {
+      this.win = { offset, count, total };
+      const first = body.querySelector('tr:not(.spacer)');
+      if (first && first.offsetHeight) this.rowH = first.offsetHeight;
+      const k = this.scrollScale();
+      /** @type {HTMLElement} */ (top.firstChild).style.height = offset * this.rowH * k + 'px';
+      /** @type {HTMLElement} */ (bottom.firstChild).style.height = Math.max(0, total - offset - count) * this.rowH * k + 'px';
+      this.keepWidths(table);
+      const a = keep;
+      if (a === 'top') {
+        this.scroll.scrollTop = 0;
+      } else if (a && a.first >= offset && a.first < offset + count) {
+        // Rows outside the window are scaled, so the same row may now be at another position.
+        const g = this.bodyGeometry();
+        if (g) this.scroll.scrollTop = g.top + this.rowTop(a.first) + a.delta - g.head;
+      }
+      // The estimate of a far row's position (scaled) may be off: now that it is rendered, show it.
+      const reveal = this.revealRow;
+      if (reveal !== undefined && reveal >= offset && reveal < offset + count) {
+        this.revealRow = undefined;
+        this.scrollToRow(reveal);
+      }
+    }
+
+    /** Before rendering a window: 'top' after a change of the rows, else the rows visible now. */
+    keepPosition() {
+      const top = this.anchor === 'top';
+      this.anchor = null;
+      return top ? 'top' : this.visibleRows();
+    }
+
+    /** Columns only grow while scrolling through the rows (unless the user set their widths). */
+    keepWidths(table) {
+      if (table.classList.contains('fixed')) return;
+      const leaf = this.leafRow(table);
+      if (!leaf) return;
+      for (const cell of leaf.cells) {
+        const key = /** @type {HTMLElement} */ (cell).dataset.wkey;
+        if (!key) continue;
+        const w = cell.getBoundingClientRect().width;
+        if (w > (this.seenWidths[key] || 0)) this.seenWidths[key] = w;
+        /** @type {HTMLElement} */ (cell).style.minWidth = this.seenWidths[key] + 'px';
+      }
     }
 
     showMessage(text, cls) {
@@ -1044,10 +1319,12 @@
       this.selLabel.textContent = '';
       this.rowHeadMap = new Map();
       this.colHeadRanges = [];
+      this.win = null;
+      this.anchor = 'top';
     }
 
     setView(view) {
-      if (view === this.state.view || (view === 'table' && !this.canPivot())) return;
+      if (view === this.state.view || (view === 'table' && !this.canPivot()) || (view === 'chart' && !this.canChart())) return;
       this.state.view = view;
       this.state.page = 0;
       this.state.colPage = 0;
@@ -1192,11 +1469,15 @@
     }
 
     updateToolbar() {
-      const table = this.state.view === 'table';
-      this.viewToggle.hidden = !this.canPivot();
-      this.listButton.setAttribute('aria-pressed', String(!table));
-      this.tableButton.setAttribute('aria-pressed', String(table));
-      this.fieldsButton.hidden = this.columns.filter((_, i) => this.isValueColumn(i)).length < 2;
+      const view = this.state.view;
+      this.viewToggle.hidden = !this.canPivot() && !this.canChart();
+      this.tableButton.hidden = !this.canPivot();
+      this.chartButton.hidden = !this.canChart();
+      this.listButton.setAttribute('aria-pressed', String(view !== 'table' && view !== 'chart'));
+      this.tableButton.setAttribute('aria-pressed', String(view === 'table'));
+      this.chartButton.setAttribute('aria-pressed', String(view === 'chart'));
+      // A chart shows one value column (chosen in its controls).
+      this.fieldsButton.hidden = view === 'chart' || this.columns.filter((_, i) => this.isValueColumn(i)).length < 2;
       this.formatButton.hidden = !this.columns.some((c) => c.kind === 'value');
       this.formatButton.classList.toggle('active', !!this.state.format);
       const n = this.state.columnFilters.length;
@@ -1225,13 +1506,19 @@
 
     /** Renders a page sent by the host (list or pivot). */
     show(p) {
+      // An answer to an older query (e.g. a window scrolled past).
+      if (p.seq !== undefined && p.seq !== this.seq) return;
       this.lastPage = p;
       this.el.classList.remove('loading');
       this.columns = p.allColumns;
       this.effectiveFormat = p.format;
       this.squeezeInfo = p.squeeze;
       this.state.page = p.page;
-      if (p.kind === 'pivot') {
+      if (p.kind === 'chart') {
+        this.state.chart = p.chart;
+        this.shapeChanged();
+        this.renderChart(p);
+      } else if (p.kind === 'pivot') {
         this.state.rowDims = p.rowDims;
         this.state.colDims = p.colDims;
         this.state.colPage = p.colPage;
@@ -1310,6 +1597,9 @@
       this.cellMap = new Map();
       this.highlighted = [];
       this.extent = { kind: 'list', rows: p.filteredCount, cols: p.columnIndex.length, r0: p.offset, r1: p.offset + p.rows.length - 1, c0: 0, c1: p.columnIndex.length - 1 };
+      const top = this.spacer(p.columnIndex.length + 1, 0);
+      const bottom = this.spacer(p.columnIndex.length + 1, 0);
+      body.append(top);
       p.rows.forEach((row, r) => {
         const marks = new Set(row.marks || []);
         const abs = p.offset + r;
@@ -1326,16 +1616,18 @@
         });
         body.append(tr);
       });
+      body.append(bottom);
       const table = h('table', null, h('thead', null, header), body);
+      const keep = this.keepPosition();
       fill(this.scroll, table, p.rows.length ? null : this.emptyNote(p));
       this.applyWidths(table);
+      this.placeWindow(table, body, p.offset, p.rows.length, p.filteredCount, top, bottom, keep);
       // Keep the keyboard focus on a column moved with Alt+arrow.
       if (this.refocusColumn !== undefined) {
         const th = /** @type {HTMLElement} */ (table.querySelector('th[data-col="' + this.refocusColumn + '"]'));
         this.refocusColumn = undefined;
         if (th) th.focus();
       }
-      this.scroll.scrollTop = 0;
       this.countLabel.textContent =
         p.filteredCount === p.totalCount ? plural(p.totalCount, 'record') : `${fmt.format(p.filteredCount)} of ${plural(p.totalCount, 'record')}`;
       this.renderPager(p, null);
@@ -1343,6 +1635,154 @@
 
     emptyNote(p) {
       return h('div', { class: 'empty' }, p.totalCount ? 'No records match the filters.' : 'This symbol has no records.');
+    }
+
+    // Chart view -------------------------------------------------------------
+
+    /** Sets part of the chart spec (type, x, series, value) and asks for the chart. */
+    setChart(change) {
+      this.state.chart = Object.assign({}, this.state.chart, change);
+      this.query();
+    }
+
+    renderChart(p) {
+      const cols = p.allColumns;
+      const keys = cols.map((c, i) => i).filter((i) => cols[i].kind === 'key');
+      const values = cols.map((c, i) => i).filter((i) => cols[i].kind === 'value');
+      const { type, x, series, value } = p.chart;
+      const select = (label, options, current, onChange, title) => {
+        const el = h('select', { 'aria-label': label, title, onchange: () => onChange(Number(el.value)) }, ...options.map(([v, text]) => h('option', { value: String(v) }, text)));
+        el.value = String(current);
+        return h('label', { class: 'chart-control' }, h('span', { class: 'zone-label' }, label), el);
+      };
+      const typeButton = (t, text, title, disabled) =>
+        h('button', { class: 'seg', 'aria-pressed': String(type === t), title, disabled: disabled || undefined, onclick: () => this.setChart({ type: t }) }, text);
+      const heat = type === 'heatmap';
+      const others = keys.filter((k) => k !== x);
+      fill(
+        this.chipBar,
+        h(
+          'span',
+          { class: 'segmented', role: 'group', 'aria-label': 'Chart type' },
+          typeButton('bar', 'Bars', 'Horizontal bars: compare magnitudes'),
+          typeButton('line', 'Lines', 'Lines: trends along an ordered dimension such as time'),
+          typeButton('heatmap', 'Heatmap', keys.length >= 2 ? 'Colored grid of two dimensions' : 'Needs two dimensions', keys.length < 2),
+        ),
+        select(heat ? 'Columns' : 'Categories', keys.map((k) => [k, cols[k].name]), x, (v) => this.setChart({ x: v, series: v === series ? undefined : series }), 'The dimension along the category axis'),
+        others.length && series !== FIELD_SERIES
+          ? select(heat ? 'Rows' : 'Series', [...(heat ? [] : [[-1, 'None']]), ...others.map((k) => [k, cols[k].name])], series, (v) => this.setChart({ series: v }), heat ? 'The dimension of the rows' : 'One series per label of this dimension (at most 8; the others are summed as Other)')
+          : null,
+        cols.some((c) => c.side) ? this.diffValueSelect(p) : values.length > 1 ? select('Value', values.map((v) => [v, cols[v].name]), value, (v) => this.setChart({ value: v }), 'The numbers to chart') : null,
+        h('span', { class: 'zone-label' }, 'Filters'),
+        ...[...keys, value].map((c) => h('span', { class: 'chip fixed' + (this.filterFor(c) ? ' filtered' : ''), title: `Filter ${cols[c].name}` }, cols[c].name, this.filterButton(c, cols[c].name))),
+        h('span', { class: 'spacer' }),
+        (this.imageButton = h('button', { title: 'Save or copy the chart as an image', onclick: () => this.openImageMenu() }, 'Image ▾')),
+      );
+      this.chipBar.hidden = false;
+      // No cells to select or search in a chart.
+      this.cellMap = new Map();
+      this.highlighted = [];
+      this.extent = { kind: 'list', rows: 0, cols: 0, r0: 0, r1: -1, c0: 0, c1: -1 };
+      this.rowHeadMap = new Map();
+      this.colHeadRanges = [];
+      this.pager.replaceChildren();
+      this.pager.hidden = true;
+      const records = p.filteredCount === p.totalCount ? plural(p.totalCount, 'record') : `${fmt.format(p.filteredCount)} of ${plural(p.totalCount, 'record')}`;
+      this.countLabel.textContent = records;
+      this.drawChart(p);
+      this.scroll.scrollTop = 0;
+      this.scroll.scrollLeft = 0;
+    }
+
+    /**
+     * The value choice of a comparison: per field its differences, or the values of both files
+     * as two series (a heatmap shows one column: the differences or one file's values).
+     */
+    diffValueSelect(p) {
+      const cols = p.allColumns;
+      const { type, series, value, fields } = p.chart;
+      const options = [];
+      cols.forEach((c, i) => {
+        if (c.side !== 1 || c.kind !== 'value' || !cols[i + 1] || cols[i + 1].side !== 2) return;
+        const field = c.name.replace(/ \(file 1\)$/, '');
+        const delta = cols[i + 2] && cols[i + 2].delta ? i + 2 : -1;
+        if (delta >= 0) options.push([`v:${delta}`, cols[delta].name]);
+        if (type === 'heatmap') options.push([`v:${i}`, c.name], [`v:${i + 1}`, cols[i + 1].name]);
+        else options.push([`f:${i},${i + 1}`, `${field}: file 1 and file 2`]);
+      });
+      const current = series === FIELD_SERIES ? `f:${fields.join(',')}` : `v:${value}`;
+      const el = h(
+        'select',
+        {
+          'aria-label': 'Value',
+          title: 'The differences (file 2 − file 1), or the values of both files',
+          onchange: () => {
+            const [kind, rest] = el.value.split(':');
+            const nums = rest.split(',').map(Number);
+            if (kind === 'f') this.setChart({ series: FIELD_SERIES, fields: nums });
+            else this.setChart({ value: nums[0], series: series === FIELD_SERIES ? -1 : series, fields: undefined });
+          },
+        },
+        ...options.map(([v, text]) => h('option', { value: v }, text)),
+      );
+      el.value = current;
+      return h('label', { class: 'chart-control' }, h('span', { class: 'zone-label' }, 'Value'), el);
+    }
+
+    /** Draws the chart of a chart page for the current width, with notes on what it leaves out. */
+    drawChart(p) {
+      const cols = p.allColumns;
+      const notes = [];
+      if (p.summed.length) notes.push(`Summed over ${p.summed.map((c) => cols[c].name).join(', ')}.`);
+      if (p.chart.series !== FIELD_SERIES && cols[p.chart.value].delta) {
+        notes.push(`Δ = file 2 − file 1${p.signColors ? ' (blue: higher in file 2, red: lower)' : ''}; records in only one file have no Δ.`);
+      }
+      const skipped = Object.entries(p.skipped).map(([k, n]) => `${fmt.format(n)} ${SPECIAL_LABEL[k]}`);
+      if (skipped.length) notes.push(`Not shown: ${skipped.join(', ')}.`);
+      if (p.eps) notes.push(`${plural(p.eps, 'EPS value')} counted as 0.`);
+      if (p.omittedCategories) notes.push(`Only the first ${fmt.format(p.categories.length)} ${cols[p.chart.x].name} labels are shown (${fmt.format(p.omittedCategories)} more): filter to see others.`);
+      if (p.omittedSeries) notes.push(`Only the first ${fmt.format(p.series.length)} rows are shown (${fmt.format(p.omittedSeries)} more).`);
+      this.chartNotes = notes.join(' ');
+      // @ts-ignore
+      const chart = window.GdxChart.render(p, this.scroll.clientWidth);
+      this.chartEl = chart;
+      if (this.imageButton) this.imageButton.disabled = !chart;
+      const empty = !chart ? h('div', { class: 'empty' }, p.filteredCount ? 'No numbers to chart.' : p.totalCount ? 'No records match the filters.' : 'This symbol has no records.') : null;
+      fill(this.scroll, notes.length ? h('div', { class: 'chart-notes' }, notes.join(' ')) : null, chart, empty);
+    }
+
+    openImageMenu() {
+      const item = (label, run) => h('button', { class: 'menu-item', role: 'menuitem', onclick: () => (this.closePopup(true), run()) }, h('span', null, label));
+      const menu = h('div', { class: 'menu', role: 'menu' }, item('Save as PNG…', () => this.exportImage('png')), item('Save as SVG…', () => this.exportImage('svg')), item('Copy as PNG', () => this.exportImage('copy')));
+      this.closePopup();
+      this.popup = openPopup(this.imageButton, menu, { label: 'Chart image' });
+      /** @type {HTMLElement} */ (menu.querySelector('button')).focus();
+    }
+
+    /** The chart as a standalone SVG image with a title, what it shows and its notes. */
+    chartImage() {
+      const p = this.lastPage;
+      const cols = p.allColumns;
+      const { x, series, value } = p.chart;
+      const info = this.imageInfo();
+      const by = series >= 0 ? `${cols[x].name} and ${cols[series].name}` : cols[x].name;
+      // @ts-ignore
+      return window.GdxChart.toSvg(this.chartEl, { title: info.title, subtitle: [`${cols[value].name} by ${by}`, info.file].filter(Boolean).join(' · '), notes: this.chartNotes });
+    }
+
+    async exportImage(kind) {
+      if (!this.chartEl) return;
+      try {
+        const image = this.chartImage();
+        if (kind === 'svg') return this.onImage({ format: 'svg', data: image.svg });
+        // @ts-ignore
+        const png = await window.GdxChart.toPng(image);
+        if (kind === 'png') return this.onImage({ format: 'png', data: await base64(png) });
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+        this.onImage({ format: 'notice', text: 'Copied the chart as a PNG image.' });
+      } catch (err) {
+        this.onImage({ format: 'notice', error: true, text: `The chart image could not be ${kind === 'copy' ? 'copied' : 'created'}: ${err && err.message ? err.message : err}` });
+      }
     }
 
     // Table view -------------------------------------------------------------
@@ -1506,6 +1946,10 @@
       this.cellMap = new Map();
       this.highlighted = [];
       this.extent = { kind: 'pivot', rows: p.rowCount, cols: p.colCount, r0: p.offset, r1: p.offset + p.rows.length - 1, c0: p.colOffset, c1: p.colOffset + p.headers.length - 1 };
+      const spanCols = Math.max(1, p.rowDims.length) + p.headers.length;
+      const top = this.spacer(spanCols, 0);
+      const bottom = this.spacer(spanCols, 0);
+      body.append(top);
       let prev = null;
       p.rows.forEach((row, ri) => {
         const abs = p.offset + ri;
@@ -1534,31 +1978,22 @@
         body.append(tr);
         prev = row;
       });
+      body.append(bottom);
       const table = h('table', { class: 'pivot' }, thead, body);
+      const left = this.scroll.scrollLeft;
+      const keep = this.keepPosition();
       fill(this.scroll, table, p.rows.length ? null : this.emptyNote(p));
       this.applyWidths(table);
-      this.scroll.scrollTop = 0;
-      this.scroll.scrollLeft = 0;
+      this.placeWindow(table, body, p.offset, p.rows.length, p.rowCount, top, bottom, keep);
+      this.scroll.scrollLeft = keep === 'top' ? 0 : left;
       const records = p.filteredCount === p.totalCount ? plural(p.totalCount, 'record') : `${fmt.format(p.filteredCount)} of ${plural(p.totalCount, 'record')}`;
       this.countLabel.textContent = `${records} · ${plural(p.rowCount, 'row')} × ${plural(p.colCount, 'column')}`;
       this.renderPager(p, p);
     }
 
+    /** Rows scroll continuously; only the columns of a wide table view are paged. */
     renderPager(p, pivot) {
       const parts = [];
-      if (p.pageCount > 1) {
-        const total = pivot ? pivot.rowCount : p.filteredCount;
-        const shown = pivot ? pivot.rows.length : p.rows.length;
-        parts.push(
-          ...this.pagerButtons(
-            p.page,
-            p.pageCount,
-            (page) => ((this.state.page = page), this.query()),
-            `${pivot ? 'Rows' : 'Records'} ${fmt.format(p.offset + 1)}–${fmt.format(p.offset + shown)} of ${fmt.format(total)}`,
-            pivot ? 'rows' : 'records',
-          ),
-        );
-      }
       if (pivot && pivot.colPageCount > 1) {
         if (parts.length) parts.push(h('span', { class: 'sep' }));
         parts.push(
