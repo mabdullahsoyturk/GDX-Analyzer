@@ -119,7 +119,7 @@ function rangeRule(min?: number, max?: number, exclude?: boolean): string | unde
  */
 export function connectInstructions(gdxFile: string, xlsxFile: string, items: ExportItem[], options: ExportOptions, defaults: ExportDefaults): string {
   const lines: string[] = [
-    '# GAMS Connect instructions written by the GDX Viewer for VS Code.',
+    '# GAMS Connect instructions written by GDX Analyzer for VS Code.',
     `# Run them with: gamsconnect "<this file>"`,
   ];
   const writerSymbols: string[] = [];

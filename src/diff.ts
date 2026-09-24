@@ -32,7 +32,7 @@ type FromWebview =
   | { type: 'options'; options: DiffOptions };
 
 export function diffOptionsFromSettings(): DiffOptions {
-  const cfg = vscode.workspace.getConfiguration('gdx.diff');
+  const cfg = vscode.workspace.getConfiguration('gdxAnalyzer.diff');
   return {
     eps: cfg.get<number>('eps', 0),
     relEps: cfg.get<number>('relEps', 0),
@@ -97,7 +97,7 @@ export class DiffPanel implements vscode.Disposable {
   ) {
     this.workDir = path.join(storage.fsPath, 'diffs', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     this.diffFile = path.join(this.workDir, 'diff.gdx');
-    this.panel = vscode.window.createWebviewPanel('gdx.diff', this.title(), vscode.ViewColumn.Active, {
+    this.panel = vscode.window.createWebviewPanel('gdxAnalyzer.diff', this.title(), vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
@@ -110,10 +110,10 @@ export class DiffPanel implements vscode.Disposable {
       this.panel.webview.onDidReceiveMessage((m: FromWebview) => this.onMessage(m)),
       vscode.workspace.onDidChangeConfiguration((e) => {
         // Pages are formatted by the extension: ask the webview for the current page again.
-        if (e.affectsConfiguration('gdx.numberFormat') || e.affectsConfiguration('gdx.squeezeDefaults') || e.affectsConfiguration('gdx.maxRowsPerPage') || e.affectsConfiguration('gdx.maxColumnsPerPage')) {
+        if (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults') || e.affectsConfiguration('gdxAnalyzer.maxRowsPerPage') || e.affectsConfiguration('gdxAnalyzer.maxColumnsPerPage')) {
           this.panel.webview.postMessage({ type: 'requery' });
         }
-        if (e.affectsConfiguration('gdx.encoding')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding')) {
           // The labels are read again with the new encoding.
           this.views = new Map();
           this.panel.webview.postMessage({ type: 'requery' });
@@ -298,11 +298,11 @@ export class DiffPanel implements vscode.Disposable {
             this.domainCache = undefined;
             return this.run();
           case 'open1':
-            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.file1), 'gdx.viewer');
+            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.file1), 'gdxAnalyzer.viewer');
           case 'open2':
-            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.file2), 'gdx.viewer');
+            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.file2), 'gdxAnalyzer.viewer');
           case 'openDiffFile':
-            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.diffFile), 'gdx.viewer');
+            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.diffFile), 'gdxAnalyzer.viewer');
           case 'saveDiffFile': {
             const target = await vscode.window.showSaveDialog({
               defaultUri: vscode.Uri.file(path.join(path.dirname(this.file1), 'diff.gdx')),

@@ -15,7 +15,7 @@ interface Entry {
   state: unknown;
 }
 
-const KEY = 'gdx.viewStates';
+const KEY = 'gdxAnalyzer.viewStates';
 export const MAX_FILES = 100;
 
 /** Normalizes file paths so that the same file maps to one entry (Windows paths are case-insensitive). */

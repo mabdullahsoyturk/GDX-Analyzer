@@ -423,7 +423,7 @@
       h('div', { class: 'row' }, precisionLabel, precision, fullLabel),
       squeezeLabel,
       h('div', { class: 'muted small' }, 'Sorting, filters and Copy use the exact values. Hover a value to see it exactly.'),
-      h('div', { class: 'row end' }, h('button', { onclick: () => (table.setFormat(undefined), table.closePopup(true)), title: 'Use the format from the settings (gdx.numberFormat)' }, 'Use Defaults')),
+      h('div', { class: 'row end' }, h('button', { onclick: () => (table.setFormat(undefined), table.closePopup(true)), title: 'Use the format from the settings (gdxAnalyzer.numberFormat)' }, 'Use Defaults')),
     );
     return { content, focus: () => radios.find((l) => l.querySelector('input').checked).querySelector('input').focus() };
   }
@@ -1457,7 +1457,7 @@
         squeeze.available
           ? h(
               'label',
-              { class: 'check sep-above', title: 'Hide fields that have the default value of the variable or equation type in every record (setting gdx.squeezeDefaults)' },
+              { class: 'check sep-above', title: 'Hide fields that have the default value of the variable or equation type in every record (setting gdxAnalyzer.squeezeDefaults)' },
               squeezeBox,
               'Squeeze defaults',
             )
@@ -2029,7 +2029,7 @@
     const expected = Number(app.dataset.protocol || 0);
     if (m.protocol === expected) return true;
     app.replaceChildren(
-      h('div', { class: 'error' }, 'The GDX Viewer extension was updated, but this window still runs the previous version.'),
+      h('div', { class: 'error' }, 'The GDX Analyzer extension was updated, but this window still runs the previous version.'),
       h('div', { class: 'notice' }, 'Run "Developer: Reload Window" from the Command Palette (or restart VS Code) to finish the update.'),
     );
     return false;

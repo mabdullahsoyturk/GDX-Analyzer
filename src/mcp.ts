@@ -4,7 +4,7 @@
  * Claude Code can run it with `node out/mcp.js` (GDX: Copy MCP Server Configuration).
  *
  * The tools are found like in the extension; these environment variables set them:
- *   GDX_BACKEND                auto (default), gams or gamspy
+ *   GDX_BACKEND                auto (default), bundled, gams or gamspy
  *   GDX_GAMS_SYSTEM_DIRECTORY  GAMS system directory with gdxdump and gdxdiff
  *   GDX_GAMSPY_EXECUTABLE      gamspy executable (or its virtual environment)
  *   GDX_ENCODING               encoding of labels and texts (default utf-8)
@@ -12,6 +12,7 @@
  * The protocol is newline-delimited JSON-RPC 2.0 on stdin/stdout; logs go to stderr.
  * No dependency on `vscode`.
  */
+import * as path from 'path';
 import * as readline from 'readline';
 import { GdxQueries, QueryError, TOOL_SPECS } from './gdxQuery';
 import { BackendSetting, GdxTools, ToolError, ToolNotFoundError, resolveTools } from './tools';
@@ -65,11 +66,13 @@ export class McpServer {
       const env = this.env;
       const resolved = resolveTools({
         backend: (env.GDX_BACKEND as BackendSetting) || 'auto',
+        // The tools bundled with the extension, next to out/.
+        bundledDirectory: path.join(__dirname, '..', 'bin'),
         gamsSystemDirectory: env.GDX_GAMS_SYSTEM_DIRECTORY,
         gamspyExecutable: env.GDX_GAMSPY_EXECUTABLE,
         venvSearchRoots: [process.cwd()],
       });
-      this.log(`Using ${resolved.backend === 'gams' ? `gdxdump/gdxdiff from ${resolved.location}` : `the GAMSPy CLI ${resolved.location}`}`);
+      this.log(`Using ${resolved.bundled ? 'the bundled' : resolved.backend === 'gams' ? 'GAMS' : 'the GAMSPy CLI'} tools from ${resolved.location}`);
       this.cachedTools = new GdxTools(resolved, (l) => this.log(l), env.GDX_ENCODING?.trim() || 'utf-8');
     }
     return this.cachedTools;
@@ -118,7 +121,7 @@ export class McpServer {
         return {
           protocolVersion: typeof requested === 'string' && PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
           capabilities: { tools: {} },
-          serverInfo: { name: 'gdx', title: 'GDX Viewer', version: VERSION },
+          serverInfo: { name: 'gdx', title: 'GDX Analyzer', version: VERSION },
           instructions:
             'Read-only access to GAMS GDX files (model data and solutions). Call gdx_list_symbols first, then gdx_read_symbol or gdx_symbol_stats ' +
             'for the records of a symbol; gdx_compare compares two files with gdxdiff. Results are CSV with exact values and are paged.',

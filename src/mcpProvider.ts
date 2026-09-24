@@ -9,7 +9,7 @@ import { findOnPath } from './tools';
 
 /** Environment of the server: the tools the extension uses, and the encoding. */
 function serverEnv(service: GdxService): Record<string, string> {
-  const cfg = vscode.workspace.getConfiguration('gdx');
+  const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
   const env: Record<string, string> = {};
   const encoding = cfg.get<string>('encoding', 'utf-8').trim();
   if (encoding && encoding.toLowerCase() !== 'utf-8') {
@@ -18,8 +18,13 @@ function serverEnv(service: GdxService): Record<string, string> {
   try {
     // The resolved tools, so that the server finds them like the extension does (e.g. in a workspace .venv).
     const tools = service.tools().tools;
-    env.GDX_BACKEND = tools.backend;
-    env[tools.backend === 'gams' ? 'GDX_GAMS_SYSTEM_DIRECTORY' : 'GDX_GAMSPY_EXECUTABLE'] = tools.location;
+    if (tools.bundled) {
+      // The server finds the bundled tools itself (next to its script).
+      env.GDX_BACKEND = 'bundled';
+    } else {
+      env.GDX_BACKEND = tools.backend;
+      env[tools.backend === 'gams' ? 'GDX_GAMS_SYSTEM_DIRECTORY' : 'GDX_GAMSPY_EXECUTABLE'] = tools.location;
+    }
   } catch {
     // Not found: the server reports it when a tool is called.
     env.GDX_BACKEND = cfg.get<string>('backend', 'auto');
@@ -33,9 +38,9 @@ export function registerMcpServer(context: vscode.ExtensionContext, service: Gdx
   const changed = new vscode.EventEmitter<void>();
   context.subscriptions.push(
     changed,
-    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('gdx') && changed.fire()),
+    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('gdxAnalyzer') && changed.fire()),
     vscode.workspace.onDidChangeWorkspaceFolders(() => changed.fire()),
-    vscode.lm.registerMcpServerDefinitionProvider('gdx.mcp', {
+    vscode.lm.registerMcpServerDefinitionProvider('gdxAnalyzer.mcp', {
       onDidChangeMcpServerDefinitions: changed.event,
       provideMcpServerDefinitions: () => {
         // VS Code's own runtime runs the script as Node.js.
@@ -47,7 +52,7 @@ export function registerMcpServer(context: vscode.ExtensionContext, service: Gdx
         return [server];
       },
     }),
-    vscode.commands.registerCommand('gdx.copyMcpServerConfig', async () => {
+    vscode.commands.registerCommand('gdxAnalyzer.copyMcpServerConfig', async () => {
       const node = findOnPath('node');
       const command = node ? 'node' : process.execPath;
       const env = { ...(node ? {} : { ELECTRON_RUN_AS_NODE: '1' }), ...serverEnv(service) };

@@ -103,7 +103,7 @@
       h('div', { class: 'grid2' }, eps.label, eps.input, relEps.label, relEps.input, h('span', null, 'Field'), field, ids.label, ids.input, skip.label, skip.input),
       h('div', { class: 'col' }, fieldOnly.el, diffOnly.el, setText.el, defaults.el, domains.el, order.el),
       error,
-      h('div', { class: 'muted small' }, 'The defaults come from the settings gdx.diff.*.'),
+      h('div', { class: 'muted small' }, 'The defaults come from the settings gdxAnalyzer.diff.*.'),
       h(
         'div',
         { class: 'row end' },

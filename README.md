@@ -1,7 +1,12 @@
-# GDX Viewer for VS Code
+# GDX Analyzer for VS Code
+
+> An independent, unofficial extension by Muhammet Soyturk. It is not made, endorsed or supported by
+> GAMS Software GmbH; GAMS and GAMSPy are their products.
 
 View, dump and compare [GAMS](https://www.gams.com) GDX files in VS Code. The extension does not read GDX
-files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a GAMS installation or through the
+files itself; it runs the tools **gdxdump** and **gdxdiff**. The packages for Windows, macOS and Linux include
+them, built from the open-source [GDX API](https://github.com/GAMS-dev/gdx) (MIT license), so nothing else needs
+to be installed. The extension can also use the tools of a GAMS installation or the
 [GAMSPy](https://gamspy.readthedocs.io) CLI (`gamspy gdx dump` / `gamspy gdx diff`).
 
 ## Features
@@ -22,7 +27,7 @@ files itself; it runs the GAMS tools **gdxdump** and **gdxdiff**, either from a 
   elements (UELs) of the file in GDX order with their UEL numbers. It can be sorted, filtered, searched and
   copied like any symbol.
 - **Encoding**: GDX files store labels and explanatory texts as the bytes GAMS wrote, so a file created from
-  sources in a legacy encoding (e.g. Latin-1) shows wrong characters when read as UTF-8. Set `gdx.encoding`, or
+  sources in a legacy encoding (e.g. Latin-1) shows wrong characters when read as UTF-8. Set `gdxAnalyzer.encoding`, or
   use *GDX: Select Encoding of Labels…*, to read them in another encoding; open viewers, comparisons and
   gdxdump documents are read again.
 - **Squeeze defaults**: *Fields* can hide the fields of variables and equations that have their default value
@@ -137,43 +142,46 @@ Relative file paths are resolved against the server's working directory (the fir
 
 ## Requirements
 
-VS Code 1.101 or later, and one of:
+VS Code 1.101 or later. The packages for Windows (x64), macOS (Intel and Apple silicon) and Linux (x64 and arm64)
+bundle gdxdump and gdxdiff. On other platforms, or with `gdxAnalyzer.backend` set to `gams` or `gamspy`, the
+extension uses one of:
 
-- A **GAMS** installation. The extension looks in `gdx.gamsSystemDirectory`, then the `PATH`, then the standard
+- A **GAMS** installation. The extension looks in `gdxAnalyzer.gamsSystemDirectory`, then the `PATH`, then the standard
   install locations (`C:\GAMS\<version>` on Windows, `/Library/Frameworks/GAMS.framework/...` on macOS,
   `/opt/gams/...` and `~/gams*` on Linux).
-- **GAMSPy** (`pip install gamspy`). The extension looks in `gdx.gamspyExecutable`, then a `.venv`/`venv` in the
+- **GAMSPy** (`pip install gamspy`). The extension looks in `gdxAnalyzer.gamspyExecutable`, then a `.venv`/`venv` in the
   workspace folders, then the `PATH`.
 
-With `gdx.backend` set to `auto` (the default), GAMS is preferred because gdxdump starts faster than the
-Python-based GAMSPy CLI. *GDX: Show Tool Information* shows which tools are in use, and the **GDX** output channel
+With `gdxAnalyzer.backend` set to `auto` (the default), the bundled tools are used if the package has them, then
+GAMS, which is preferred to GAMSPy because gdxdump starts faster than the Python-based GAMSPy CLI. Set it to `gams`
+to use the tools of a particular GAMS version. *GDX: Show Tool Information* shows which tools are in use, and the **GDX** output channel
 logs every command the extension runs.
 
 ## Settings
 
 | Setting                   | Default | Description                                                          |
 | ------------------------- | ------- | -------------------------------------------------------------------- |
-| `gdx.backend`             | `auto`  | `auto`, `gams` (gdxdump/gdxdiff) or `gamspy` (GAMSPy CLI)            |
-| `gdx.gamsSystemDirectory` |         | GAMS system directory containing gdxdump and gdxdiff                 |
-| `gdx.gamspyExecutable`    |         | Path to the `gamspy` executable (or to a virtual environment)        |
-| `gdx.encoding`            | `utf-8` | Encoding of labels and texts in GDX files, e.g. `windows-1252`      |
-| `gdx.maxRowsPerPage`      | `500`   | Records (list view) or rows (table view) loaded at once while scrolling |
-| `gdx.maxColumnsPerPage`   | `100`   | Columns per page in the table view                                   |
-| `gdx.numberFormat.style`  | `g`     | Default number format: `g` (automatic), `f` (fixed), `e` (scientific) |
-| `gdx.numberFormat.precision` | `6` | Significant digits (`g`, `e`: 1-17) or decimals (`f`: 0-14)        |
-| `gdx.numberFormat.fullPrecision` | `false` | Show the fewest digits that reproduce values exactly (`g`, `e`) |
-| `gdx.numberFormat.squeezeTrailingZeros` | `true` | Remove trailing zeros after the decimal point              |
-| `gdx.squeezeDefaults`    | `false` | Hide variable/equation fields with default values only           |
-| `gdx.rememberViewState`  | `true`  | Remember the view of each file after it is closed                  |
-| `gdx.copy.decimalSeparator` | `period` | Decimal separator of copied numbers: `period`, `system` or `custom` |
-| `gdx.copy.customDecimalSeparator` | `,` | Separator used with `custom`                                   |
-| `gdx.diff.eps`            | `0`     | Absolute tolerance for gdxdiff (`Eps`); 0 uses the tool default      |
-| `gdx.diff.relEps`         | `0`     | Relative tolerance for gdxdiff (`RelEps`); 0 uses the tool default   |
-| `gdx.diff.field`          | `All`   | Variable/equation field to compare (`L`, `M`, `Lo`, `Up`, ...)       |
-| `gdx.diff.ignoreSetText` | `false` | Do not compare set element texts (`SetDesc=N`)                    |
-| `gdx.diff.compareDefaults` | `false` | Report default values found in one file only (`CmpDefaults`)  |
-| `gdx.diff.compareDomains` | `false` | Also compare symbol domains (`CmpDomains`)                           |
-| `gdx.diff.ignoreOrder`    | `false` | Ignore the UEL order of the input files (`IgnoreOrder`)              |
+| `gdxAnalyzer.backend`             | `auto`  | `auto`, `bundled`, `gams` (gdxdump/gdxdiff of GAMS) or `gamspy` (GAMSPy CLI) |
+| `gdxAnalyzer.gamsSystemDirectory` |         | GAMS system directory containing gdxdump and gdxdiff                 |
+| `gdxAnalyzer.gamspyExecutable`    |         | Path to the `gamspy` executable (or to a virtual environment)        |
+| `gdxAnalyzer.encoding`            | `utf-8` | Encoding of labels and texts in GDX files, e.g. `windows-1252`      |
+| `gdxAnalyzer.maxRowsPerPage`      | `500`   | Records (list view) or rows (table view) loaded at once while scrolling |
+| `gdxAnalyzer.maxColumnsPerPage`   | `100`   | Columns per page in the table view                                   |
+| `gdxAnalyzer.numberFormat.style`  | `g`     | Default number format: `g` (automatic), `f` (fixed), `e` (scientific) |
+| `gdxAnalyzer.numberFormat.precision` | `6` | Significant digits (`g`, `e`: 1-17) or decimals (`f`: 0-14)        |
+| `gdxAnalyzer.numberFormat.fullPrecision` | `false` | Show the fewest digits that reproduce values exactly (`g`, `e`) |
+| `gdxAnalyzer.numberFormat.squeezeTrailingZeros` | `true` | Remove trailing zeros after the decimal point              |
+| `gdxAnalyzer.squeezeDefaults`    | `false` | Hide variable/equation fields with default values only           |
+| `gdxAnalyzer.rememberViewState`  | `true`  | Remember the view of each file after it is closed                  |
+| `gdxAnalyzer.copy.decimalSeparator` | `period` | Decimal separator of copied numbers: `period`, `system` or `custom` |
+| `gdxAnalyzer.copy.customDecimalSeparator` | `,` | Separator used with `custom`                                   |
+| `gdxAnalyzer.diff.eps`            | `0`     | Absolute tolerance for gdxdiff (`Eps`); 0 uses the tool default      |
+| `gdxAnalyzer.diff.relEps`         | `0`     | Relative tolerance for gdxdiff (`RelEps`); 0 uses the tool default   |
+| `gdxAnalyzer.diff.field`          | `All`   | Variable/equation field to compare (`L`, `M`, `Lo`, `Up`, ...)       |
+| `gdxAnalyzer.diff.ignoreSetText` | `false` | Do not compare set element texts (`SetDesc=N`)                    |
+| `gdxAnalyzer.diff.compareDefaults` | `false` | Report default values found in one file only (`CmpDefaults`)  |
+| `gdxAnalyzer.diff.compareDomains` | `false` | Also compare symbol domains (`CmpDomains`)                           |
+| `gdxAnalyzer.diff.ignoreOrder`    | `false` | Ignore the UEL order of the input files (`IgnoreOrder`)              |
 
 ## Large files
 
@@ -196,6 +204,25 @@ Excel's limits (1,048,576 rows, 16,384 columns); use filters to reduce larger sy
 - Only files on the local file system are supported, because the tools are run as local processes.
 - With the GAMSPy backend, file names must end in lower-case `.gdx`; the GAMSPy CLI appends `.gdx` to any other
   name.
+
+## Bundled tools and packaging
+
+`scripts/build-gdx-tools.sh` (Linux, macOS) and `scripts/build-gdx-tools.ps1` (Windows) build gdxdump, gdxdiff and
+the GDX library from a release of [GAMS-dev/gdx](https://github.com/GAMS-dev/gdx) (`GDX_VERSION`, default 7.12.1)
+into `tools/<platform>` and smoke-test them; `scripts/package.sh <platform>` packages the extension with those
+tools (`dist/gdx-analyzer-<version>-<platform>.vsix`), `scripts/package.sh universal` without tools. On Linux, build
+in a `manylinux_2_28` container so that the tools run with glibc 2.28 or later:
+
+```sh
+docker run --rm -v "$PWD":/src -w /src -u $(id -u):$(id -g) -e HOME=/tmp quay.io/pypa/manylinux_2_28_x86_64 \
+  scripts/build-gdx-tools.sh tools/linux-x64
+scripts/package.sh linux-x64
+```
+
+The GitLab pipeline (`.gitlab-ci.yml`) builds the tools on the `linux`, `linux-arm64`, `macos`, `macos-arm64` and
+`windows` runners, runs the unit tests with them, packages all platforms and, on a tag matching the version,
+publishes to the Visual Studio Marketplace and Open VSX (manual jobs; CI/CD variables `VSCE_PAT` and `OVSX_PAT`).
+The licenses of the bundled components are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Development
 

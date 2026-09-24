@@ -1,0 +1,158 @@
+# Builds gdxdump/gdxdiff from the MIT-licensed GDX sources (https://github.com/GAMS-dev/gdx) on each
+# platform, tests the extension with them, packages one VSIX per platform (plus a universal one
+# without tools) and publishes them on tags.
+#
+# Runner tags as in the GAMS projects: linux, linux-arm64 (Docker), macos, macos-arm64 (shell),
+# windows (Docker, Windows containers).
+
+default:
+  tags: [linux]
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: always
+
+stages:
+  - build-tools
+  - test
+  - package
+  - publish
+
+variables:
+  GDX_VERSION:
+    value: "7.12.1"
+    description: "Release tag of GAMS-dev/gdx to build gdxdump and gdxdiff from"
+  NODE_IMAGE:
+    value: node:22-bookworm
+    description: "Image for testing and packaging the extension"
+  MACHINES_CONTAINER_REG:
+    value: registry.gams.com/devel/machines
+    description: "URL to the container registry of the machines repository (Windows builder image)"
+  GIT_DEPTH: "20"
+
+#### BUILD THE GDX TOOLS ####
+
+.build-tools:
+  stage: build-tools
+  needs: []
+  artifacts:
+    name: "gdx-tools-$TARGET"
+    paths:
+      - tools/$TARGET/
+    expire_in: 1 week
+
+# manylinux_2_28 (glibc 2.28, the oldest VS Code supports): the tools run on all distributions VS Code runs on.
+.build-tools-linux:
+  extends: .build-tools
+  script:
+    - git config --global --add safe.directory '*'
+    - scripts/build-gdx-tools.sh "tools/$TARGET"
+
+build-tools-linux-x64:
+  extends: .build-tools-linux
+  tags: [linux]
+  image: quay.io/pypa/manylinux_2_28_x86_64
+  variables:
+    TARGET: linux-x64
+
+build-tools-linux-arm64:
+  extends: .build-tools-linux
+  tags: [linux-arm64]
+  image: quay.io/pypa/manylinux_2_28_aarch64
+  variables:
+    TARGET: linux-arm64
+
+.build-tools-macos:
+  extends: .build-tools
+  script:
+    - scripts/build-gdx-tools.sh "tools/$TARGET"
+
+build-tools-darwin-x64:
+  extends: .build-tools-macos
+  tags: [macos]
+  variables:
+    TARGET: darwin-x64
+
+build-tools-darwin-arm64:
+  extends: .build-tools-macos
+  tags: [macos-arm64]
+  variables:
+    TARGET: darwin-arm64
+
+build-tools-win32-x64:
+  extends: .build-tools
+  tags: [windows]
+  image:
+    name: $MACHINES_CONTAINER_REG/wei/builder-full:latest
+  variables:
+    TARGET: win32-x64
+  script:
+    - '& .\scripts\build-gdx-tools.ps1 "tools\$env:TARGET"'
+
+#### TEST ####
+
+# The unit tests with the bundled Linux tools (the tools of the other platforms are smoke-tested
+# when they are built).
+test:
+  stage: test
+  image: $NODE_IMAGE
+  needs: [build-tools-linux-x64]
+  script:
+    - npm ci
+    - npm run compile
+    - GDX_TEST_GAMS_DIR="$CI_PROJECT_DIR/tools/linux-x64" node --test "out/test/unit/*.test.js"
+
+#### PACKAGE ####
+
+package:
+  stage: package
+  image: $NODE_IMAGE
+  needs:
+    - build-tools-linux-x64
+    - build-tools-linux-arm64
+    - build-tools-darwin-x64
+    - build-tools-darwin-arm64
+    - build-tools-win32-x64
+    - test
+  script:
+    - npm ci
+    - npm run compile
+    - for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64; do scripts/package.sh "$target"; done
+    # Without tools, for other platforms: it uses a GAMS or GAMSPy installation.
+    - scripts/package.sh universal
+    - ls -l dist
+  artifacts:
+    name: "gdx-analyzer-vsix"
+    paths:
+      - dist/*.vsix
+    expire_in: 1 month
+
+#### PUBLISH ####
+
+# On a tag matching the version in package.json (e.g. v0.9.0 or 0.9.0). Needs the CI/CD variables
+# VSCE_PAT (Visual Studio Marketplace) and OVSX_PAT (Open VSX), masked and protected.
+.publish:
+  stage: publish
+  image: $NODE_IMAGE
+  needs: [package]
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - when: never
+  before_script:
+    - npm ci
+    - version=$(node -p "require('./package.json').version")
+    - test "${CI_COMMIT_TAG#v}" = "$version" || { echo "Tag $CI_COMMIT_TAG does not match version $version in package.json"; exit 1; }
+
+publish-marketplace:
+  extends: .publish
+  script:
+    - npx --no-install vsce publish --skip-duplicate --packagePath dist/*.vsix -p "$VSCE_PAT"
+
+publish-open-vsx:
+  extends: .publish
+  allow_failure: true
+  script:
+    - for f in dist/*.vsix; do npx --yes ovsx publish "$f" --skip-duplicate -p "$OVSX_PAT"; done

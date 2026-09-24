@@ -62,10 +62,10 @@ class ViewerSession implements vscode.Disposable {
       panel.webview.onDidReceiveMessage((m: FromWebview) => this.onMessage(m)),
       vscode.workspace.onDidChangeConfiguration((e) => {
         // Pages are formatted by the extension: ask the webview for the current page again.
-        if (e.affectsConfiguration('gdx.numberFormat') || e.affectsConfiguration('gdx.squeezeDefaults') || e.affectsConfiguration('gdx.maxRowsPerPage') || e.affectsConfiguration('gdx.maxColumnsPerPage')) {
+        if (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults') || e.affectsConfiguration('gdxAnalyzer.maxRowsPerPage') || e.affectsConfiguration('gdxAnalyzer.maxColumnsPerPage')) {
           panel.webview.postMessage({ type: 'requery' });
         }
-        if (e.affectsConfiguration('gdx.encoding')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding')) {
           this.load();
         }
       }),
@@ -286,17 +286,17 @@ class ViewerSession implements vscode.Disposable {
           case 'refresh':
             return this.load();
           case 'dumpAll':
-            return vscode.commands.executeCommand('gdx.dump', this.uri);
+            return vscode.commands.executeCommand('gdxAnalyzer.dump', this.uri);
           case 'compare':
-            return vscode.commands.executeCommand('gdx.compare', this.uri);
+            return vscode.commands.executeCommand('gdxAnalyzer.compare', this.uri);
           case 'settings':
-            return vscode.commands.executeCommand('workbench.action.openSettings', 'gdx.');
+            return vscode.commands.executeCommand('workbench.action.openSettings', 'gdxAnalyzer.');
           case 'showLog':
             return this.service.output.show();
           case 'dumpSymbol':
-            return vscode.commands.executeCommand('gdx.dumpSymbol', this.uri, m.name);
+            return vscode.commands.executeCommand('gdxAnalyzer.dumpSymbol', this.uri, m.name);
           case 'exportCsv':
-            return vscode.commands.executeCommand('gdx.exportCsv', this.uri, m.name);
+            return vscode.commands.executeCommand('gdxAnalyzer.exportCsv', this.uri, m.name);
         }
         return;
       case 'selection':
@@ -314,13 +314,13 @@ class ViewerSession implements vscode.Disposable {
   }
 }
 
-/** Setting gdx.rememberViewState. */
+/** Setting gdxAnalyzer.rememberViewState. */
 function rememberViews(): boolean {
-  return vscode.workspace.getConfiguration('gdx').get<boolean>('rememberViewState', true);
+  return vscode.workspace.getConfiguration('gdxAnalyzer').get<boolean>('rememberViewState', true);
 }
 
 export class GdxViewerProvider implements vscode.CustomReadonlyEditorProvider<GdxDocument> {
-  static readonly viewType = 'gdx.viewer';
+  static readonly viewType = 'gdxAnalyzer.viewer';
   private readonly sessions = new Set<{ session: ViewerSession; panel: vscode.WebviewPanel }>();
 
   constructor(

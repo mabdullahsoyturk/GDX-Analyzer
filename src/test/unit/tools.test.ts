@@ -9,7 +9,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { parseDiffOutput, parseSymbolCsv, parseSymbols, parseUelTable, pivotDiff } from '../../parse';
-import { Backend, GdxTools, ResolvedTools, buildDiffArgs, buildDumpArgs, resolveTools, run, textDecoder } from '../../tools';
+import { Backend, GdxTools, ResolvedTools, ToolNotFoundError, buildDiffArgs, buildDumpArgs, resolveTools, run, textDecoder } from '../../tools';
 
 const fixtures = path.resolve(__dirname, '../../../test/fixtures');
 const t1 = path.join(fixtures, 'transport1.gdx');
@@ -243,3 +243,31 @@ for (const backend of ['gams', 'gamspy'] as const) {
     });
   });
 }
+
+describe('bundled tools', () => {
+  const exe = (n: string) => (process.platform === 'win32' ? n + '.exe' : n);
+  const fake = () => {
+    const dir = fs.mkdtempSync(path.join(tmp, 'bundled '));
+    for (const t of ['gdxdump', 'gdxdiff']) fs.writeFileSync(path.join(dir, exe(t)), '', { mode: 0o644 });
+    fs.writeFileSync(path.join(dir, 'GDX_VERSION'), '7.12.1\n');
+    return dir;
+  };
+
+  it('are preferred by auto, with their GDX version, and made executable', () => {
+    const dir = fake();
+    const t = resolveTools({ backend: 'auto', bundledDirectory: dir });
+    assert.deepEqual([t.backend, t.bundled, t.location, t.gdxdump], ['gams', { version: '7.12.1' }, dir, path.join(dir, exe('gdxdump'))]);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, 'gdxdump')).mode & 0o111, 0o111);
+  });
+
+  it('are skipped by auto and the gams backend when the package has none', () => {
+    const t = tryResolve('gams');
+    if (!t) return;
+    assert.equal(resolveTools({ backend: 'auto', bundledDirectory: path.join(tmp, 'missing'), gamsSystemDirectory: t.location }).bundled, undefined);
+    assert.equal(resolveTools({ backend: 'gams', bundledDirectory: fake(), gamsSystemDirectory: t.location }).bundled, undefined);
+  });
+
+  it('are required by the bundled backend', () => {
+    assert.throws(() => resolveTools({ backend: 'bundled', bundledDirectory: path.join(tmp, 'missing') }), (e: Error) => e instanceof ToolNotFoundError && /no bundled gdxdump\/gdxdiff for/.test(e.message));
+  });
+});

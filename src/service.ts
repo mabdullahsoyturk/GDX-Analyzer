@@ -14,10 +14,11 @@ export class GdxService implements vscode.Disposable {
   private cached?: GdxTools;
   private readonly disposables: vscode.Disposable[] = [this.output, this.selectionStatus];
 
-  constructor() {
+  /** `bundledDirectory`: where the tools bundled with the extension are (if this package has them). */
+  constructor(private readonly bundledDirectory?: string) {
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('gdx')) {
+        if (e.affectsConfiguration('gdxAnalyzer')) {
           this.cached = undefined;
         }
       }),
@@ -36,9 +37,10 @@ export class GdxService implements vscode.Disposable {
   /** Resolves the tools according to the settings; throws ToolNotFoundError if none are available. */
   tools(): GdxTools {
     if (!this.cached) {
-      const cfg = vscode.workspace.getConfiguration('gdx');
+      const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
       const resolved: ResolvedTools = resolveTools({
         backend: cfg.get<BackendSetting>('backend', 'auto'),
+        bundledDirectory: this.bundledDirectory,
         gamsSystemDirectory: cfg.get<string>('gamsSystemDirectory', ''),
         gamspyExecutable: cfg.get<string>('gamspyExecutable', ''),
         venvSearchRoots: (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath),
@@ -66,7 +68,7 @@ export class GdxService implements vscode.Disposable {
     if (err instanceof ToolNotFoundError) {
       const choice = await vscode.window.showErrorMessage(message, 'Open Settings');
       if (choice) {
-        vscode.commands.executeCommand('workbench.action.openSettings', 'gdx.');
+        vscode.commands.executeCommand('workbench.action.openSettings', 'gdxAnalyzer.');
       }
     } else {
       vscode.window.showErrorMessage(`${prefix}: ${message}`);
@@ -75,6 +77,9 @@ export class GdxService implements vscode.Disposable {
 }
 
 export function describeTools(t: ResolvedTools): string {
+  if (t.bundled) {
+    return `bundled gdxdump/gdxdiff${t.bundled.version ? ` (GDX ${t.bundled.version})` : ''}`;
+  }
   return t.backend === 'gams' ? `GAMS gdxdump/gdxdiff from ${t.location}` : `GAMSPy CLI (${t.location})`;
 }
 

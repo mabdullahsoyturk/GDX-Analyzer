@@ -39,7 +39,8 @@ function isKnownEncoding(label: string): boolean {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  const service = new GdxService();
+  // Platform-specific packages carry gdxdump/gdxdiff in bin/ (see scripts/package.sh).
+  const service = new GdxService(path.join(context.extensionPath, 'bin'));
   const viewer = new GdxViewerProvider(context.extensionUri, service, new ViewStateStore(context.globalState));
   const dumps = new GdxDumpProvider(service);
   let selectedForCompare: vscode.Uri | undefined;
@@ -115,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
           'Pick a Symbol',
         );
         if (choice === 'Pick a Symbol') {
-          return vscode.commands.executeCommand('gdx.dumpSymbol', uri);
+          return vscode.commands.executeCommand('gdxAnalyzer.dumpSymbol', uri);
         }
         if (choice !== 'Dump Anyway') {
           return;
@@ -154,7 +155,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.registerTextDocumentContentProvider(DUMP_SCHEME, dumps),
 
     vscode.commands.registerCommand(
-      'gdx.open',
+      'gdxAnalyzer.open',
       guarded('Opening the GDX file failed', async (arg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Open GDX File');
         if (uri) {
@@ -164,7 +165,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.dump',
+      'gdxAnalyzer.dump',
       guarded('gdxdump failed', async (arg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Dump GDX File');
         if (uri) {
@@ -174,7 +175,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.dumpSymbol',
+      'gdxAnalyzer.dumpSymbol',
       guarded('gdxdump failed', async (arg?: unknown, symbolArg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Dump GDX Symbol');
         const symbol = uri && (await pickSymbol(uri, symbolArg));
@@ -185,7 +186,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.exportCsv',
+      'gdxAnalyzer.exportCsv',
       guarded('Exporting to CSV failed', async (arg?: unknown, symbolArg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Export GDX Symbol');
         const symbol = uri && (await pickSymbol(uri, symbolArg));
@@ -208,17 +209,17 @@ export function activate(context: vscode.ExtensionContext) {
       }),
     ),
 
-    vscode.commands.registerCommand('gdx.selectForCompare', (arg?: unknown) => {
+    vscode.commands.registerCommand('gdxAnalyzer.selectForCompare', (arg?: unknown) => {
       const uri = currentGdx(arg);
       if (uri) {
         selectedForCompare = uri;
-        vscode.commands.executeCommand('setContext', 'gdx.hasSelectionForCompare', true);
+        vscode.commands.executeCommand('setContext', 'gdxAnalyzer.hasSelectionForCompare', true);
         vscode.window.setStatusBarMessage(`Selected ${path.basename(uri.fsPath)} for GDX compare`, 3000);
       }
     }),
 
     vscode.commands.registerCommand(
-      'gdx.compareWithSelected',
+      'gdxAnalyzer.compareWithSelected',
       guarded('gdxdiff failed', (arg?: unknown) => {
         const uri = currentGdx(arg);
         if (uri && selectedForCompare) {
@@ -228,7 +229,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.compare',
+      'gdxAnalyzer.compare',
       guarded('gdxdiff failed', async (arg?: unknown, all?: unknown) => {
         const uris = Array.isArray(all) ? all.filter((u): u is vscode.Uri => u instanceof vscode.Uri) : [];
         if (uris.length === 2) {
@@ -247,7 +248,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.exportExcel',
+      'gdxAnalyzer.exportExcel',
       guarded('Exporting failed', async (arg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Export GDX File to Excel');
         if (!uri) {
@@ -264,7 +265,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.resetViewState',
+      'gdxAnalyzer.resetViewState',
       guarded('Resetting the viewer state failed', async (arg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Reset the Viewer State of');
         if (!uri) {
@@ -277,9 +278,9 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.selectEncoding',
+      'gdxAnalyzer.selectEncoding',
       guarded('Changing the encoding failed', async () => {
-        const cfg = vscode.workspace.getConfiguration('gdx');
+        const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
         const current = cfg.get<string>('encoding', 'utf-8').trim().toLowerCase() || 'utf-8';
         const items = ENCODINGS.map(([label, description]) => ({ label, description, picked: label === current }));
         if (!items.some((i) => i.picked)) {
@@ -310,7 +311,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
-      'gdx.showToolInfo',
+      'gdxAnalyzer.showToolInfo',
       guarded('Locating the GDX tools failed', async () => {
         const tools = service.tools().tools;
         const lines = [`Backend: ${describeTools(tools)}`, `gdxdump: ${tools.gdxdump}`, `gdxdiff: ${tools.gdxdiff}`];
@@ -319,7 +320,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (choice === 'Show Log') {
           service.output.show();
         } else if (choice === 'Open Settings') {
-          vscode.commands.executeCommand('workbench.action.openSettings', 'gdx.');
+          vscode.commands.executeCommand('workbench.action.openSettings', 'gdxAnalyzer.');
         }
       }),
     ),

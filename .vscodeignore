@@ -11,3 +11,7 @@ tsconfig.json
 samples/**
 .venv/**
 venv/**
+scripts/**
+tools/**
+dist/**
+.gitlab-ci.yml

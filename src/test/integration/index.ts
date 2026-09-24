@@ -27,12 +27,12 @@ function activeText(): string | undefined {
 
 async function dumpTests(label: string) {
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-  await vscode.commands.executeCommand('gdx.dump', t1);
+  await vscode.commands.executeCommand('gdxAnalyzer.dump', t1);
   const all = await waitFor(`${label}: full dump`, () => (activeText()?.includes('Parameter a(i)') ? activeText() : undefined));
   assert.match(all, /Scalar f freight in dollars per case per thousand miles \/ 90 \/;/);
   assert.equal(vscode.window.activeTextEditor?.document.uri.scheme, 'gdxdump');
 
-  await vscode.commands.executeCommand('gdx.dumpSymbol', t1, 'x');
+  await vscode.commands.executeCommand('gdxAnalyzer.dumpSymbol', t1, 'x');
   const x = await waitFor(`${label}: symbol dump`, () => (activeText()?.includes('Variable x') ? activeText() : undefined));
   assert.match(x, /positive Variable x\(i,j\) shipment quantities in cases/);
   assert.doesNotMatch(x, /Parameter a/);
@@ -47,7 +47,7 @@ const tests: [string, () => Promise<void>][] = [
         const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
         return input instanceof vscode.TabInputCustom ? input : undefined;
       });
-      assert.equal(tab.viewType, 'gdx.viewer');
+      assert.equal(tab.viewType, 'gdxAnalyzer.viewer');
       assert.equal(tab.uri.fsPath, t1.fsPath);
     },
   ],
@@ -55,10 +55,10 @@ const tests: [string, () => Promise<void>][] = [
   [
     'compares files without errors',
     async () => {
-      await vscode.commands.executeCommand('gdx.compare', t1, [t1, t2]);
+      await vscode.commands.executeCommand('gdxAnalyzer.compare', t1, [t1, t2]);
       const tab = await waitFor('diff panel', () => {
         const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
-        return input instanceof vscode.TabInputWebview && input.viewType.endsWith('gdx.diff') ? input : undefined;
+        return input instanceof vscode.TabInputWebview && input.viewType.endsWith('gdxAnalyzer.diff') ? input : undefined;
       });
       assert.ok(tab);
     },
@@ -66,19 +66,19 @@ const tests: [string, () => Promise<void>][] = [
   [
     'registers the MCP server for AI agents',
     async () => {
-      const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-viewer');
+      const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-analyzer');
       assert.ok(ext?.isActive);
-      assert.deepEqual(ext.packageJSON.contributes.mcpServerDefinitionProviders, [{ id: 'gdx.mcp', label: 'GDX' }]);
-      assert.ok((await vscode.commands.getCommands(true)).includes('gdx.copyMcpServerConfig'));
+      assert.deepEqual(ext.packageJSON.contributes.mcpServerDefinitionProviders, [{ id: 'gdxAnalyzer.mcp', label: 'GDX' }]);
+      assert.ok((await vscode.commands.getCommands(true)).includes('gdxAnalyzer.copyMcpServerConfig'));
     },
   ],
   [
     'reads labels with the configured encoding',
     async () => {
       const latin1 = vscode.Uri.file(path.join(fixtures, 'latin1.gdx'));
-      const cfg = vscode.workspace.getConfiguration('gdx');
+      const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-      await vscode.commands.executeCommand('gdx.dumpSymbol', latin1, 'c');
+      await vscode.commands.executeCommand('gdxAnalyzer.dumpSymbol', latin1, 'c');
       await waitFor('UTF-8 dump', () => (activeText()?.includes('�') ? activeText() : undefined));
       try {
         // The open dump is read again when the setting changes.
@@ -98,7 +98,7 @@ const tests: [string, () => Promise<void>][] = [
         console.log('    (skipped: GDX_TEST_GAMSPY not set)');
         return;
       }
-      const cfg = vscode.workspace.getConfiguration('gdx');
+      const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
       await cfg.update('backend', 'gamspy', vscode.ConfigurationTarget.Global);
       await cfg.update('gamspyExecutable', gamspy, vscode.ConfigurationTarget.Global);
       try {

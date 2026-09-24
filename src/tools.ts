@@ -11,10 +11,13 @@ import * as os from 'os';
 import * as path from 'path';
 
 export type Backend = 'gams' | 'gamspy';
-export type BackendSetting = 'auto' | Backend;
+/** 'bundled': the tools shipped with the extension (built from the MIT-licensed GAMS-dev/gdx sources). */
+export type BackendSetting = 'auto' | 'bundled' | Backend;
 
 export interface ToolSettings {
   backend: BackendSetting;
+  /** The directory of the tools bundled with the extension (absent in packages without them). */
+  bundledDirectory?: string;
   gamsSystemDirectory?: string;
   gamspyExecutable?: string;
   /** Folders searched for a `.venv` / `venv` containing gamspy (usually the workspace folders). */
@@ -22,7 +25,10 @@ export interface ToolSettings {
 }
 
 export interface ResolvedTools {
+  /** The command line syntax: the bundled tools are the GAMS tools. */
   backend: Backend;
+  /** The tools bundled with the extension; `version` is their GDX release. */
+  bundled?: { version: string };
   /** GAMS backend: the system directory. GAMSPy backend: the gamspy executable. */
   location: string;
   gdxdump: string;
@@ -188,7 +194,7 @@ function resolveGams(settings: ToolSettings): ResolvedTools | undefined {
   if (configured) {
     if (!hasGdxTools(configured)) {
       throw new ToolNotFoundError(
-        `gdxdump/gdxdiff were not found in the configured GAMS system directory "${configured}" (setting gdx.gamsSystemDirectory).`,
+        `gdxdump/gdxdiff were not found in the configured GAMS system directory "${configured}" (setting gdxAnalyzer.gamsSystemDirectory).`,
       );
     }
     return make(configured);
@@ -210,7 +216,7 @@ function resolveGamspy(settings: ToolSettings): ResolvedTools | undefined {
       : [configured, isWindows && !configured.toLowerCase().endsWith('.exe') ? configured + '.exe' : configured];
     const found = candidates.find(isFile);
     if (!found) {
-      throw new ToolNotFoundError(`The configured gamspy executable "${configured}" does not exist (setting gdx.gamspyExecutable).`);
+      throw new ToolNotFoundError(`The configured gamspy executable "${configured}" does not exist (setting gdxAnalyzer.gamspyExecutable).`);
     }
     return make(found);
   }
@@ -226,8 +232,49 @@ function resolveGamspy(settings: ToolSettings): ResolvedTools | undefined {
   return onPath ? make(onPath) : undefined;
 }
 
+/** The platform name of the bundled tools, as used by `vsce package --target` (e.g. linux-x64). */
+export function bundledTarget(): string {
+  return `${process.platform === 'win32' ? 'win32' : process.platform}-${process.arch}`;
+}
+
+function resolveBundled(settings: ToolSettings): ResolvedTools | undefined {
+  const dir = settings.bundledDirectory;
+  if (!dir || !hasGdxTools(dir)) {
+    return undefined;
+  }
+  if (!isWindows) {
+    // Unpacked extensions may lose the executable bit.
+    for (const tool of ['gdxdump', 'gdxdiff']) {
+      const file = path.join(dir, tool);
+      try {
+        if ((fs.statSync(file).mode & 0o111) === 0) fs.chmodSync(file, 0o755);
+      } catch {
+        // Reported when the tool is run.
+      }
+    }
+  }
+  let version = '';
+  try {
+    version = fs.readFileSync(path.join(dir, 'GDX_VERSION'), 'utf8').trim();
+  } catch {
+    // Unknown version.
+  }
+  return { backend: 'gams', bundled: { version }, location: dir, gdxdump: path.join(dir, exe('gdxdump')), gdxdiff: path.join(dir, exe('gdxdiff')) };
+}
+
 export function resolveTools(settings: ToolSettings): ResolvedTools {
   const backend = settings.backend ?? 'auto';
+  if (backend === 'bundled' || backend === 'auto') {
+    const bundled = resolveBundled(settings);
+    if (bundled) {
+      return bundled;
+    }
+    if (backend === 'bundled') {
+      throw new ToolNotFoundError(
+        `This package of the extension has no bundled gdxdump/gdxdiff for ${bundledTarget()}. Install GAMS or GAMSPy and set the backend to auto, gams or gamspy.`,
+      );
+    }
+  }
   if (backend === 'gams' || backend === 'auto') {
     const gams = resolveGams(settings);
     if (gams) {
@@ -235,7 +282,7 @@ export function resolveTools(settings: ToolSettings): ResolvedTools {
     }
     if (backend === 'gams') {
       throw new ToolNotFoundError(
-        'No GAMS system with gdxdump/gdxdiff was found. Set gdx.gamsSystemDirectory or add the GAMS system directory to the PATH.',
+        'No GAMS system with gdxdump/gdxdiff was found. Set gdxAnalyzer.gamsSystemDirectory or add the GAMS system directory to the PATH.',
       );
     }
   }
@@ -245,9 +292,9 @@ export function resolveTools(settings: ToolSettings): ResolvedTools {
   }
   throw new ToolNotFoundError(
     backend === 'gamspy'
-      ? 'The gamspy executable was not found. Install GAMSPy (pip install gamspy) or set gdx.gamspyExecutable.'
+      ? 'The gamspy executable was not found. Install GAMSPy (pip install gamspy) or set gdxAnalyzer.gamspyExecutable.'
       : 'Neither a GAMS system (gdxdump/gdxdiff) nor the GAMSPy CLI was found. ' +
-          'Install GAMS or GAMSPy (pip install gamspy), or set gdx.gamsSystemDirectory / gdx.gamspyExecutable.',
+          'Install GAMS or GAMSPy (pip install gamspy), or set gdxAnalyzer.gamsSystemDirectory / gdxAnalyzer.gamspyExecutable.',
   );
 }
 
@@ -335,7 +382,7 @@ export function textDecoder(label = 'utf-8'): TextDecoder {
   try {
     return new TextDecoder(label.trim() || 'utf-8');
   } catch {
-    throw new RangeError(`Unknown text encoding "${label}" (setting gdx.encoding).`);
+    throw new RangeError(`Unknown text encoding "${label}" (setting gdxAnalyzer.encoding).`);
   }
 }
 
@@ -467,7 +514,12 @@ export class GdxTools {
     this.checkFile(file1);
     this.checkFile(file2);
     this.checkFile(diffFile);
-    const result = await this.exec(this.tools.gdxdiff, buildDiffArgs(this.tools.backend, file1, file2, diffFile, options), opts);
+    // gdxdiff writes a temporary file in its working directory and renames it to diffFile, which
+    // fails across file systems: run it where the difference file goes.
+    const result = await this.exec(this.tools.gdxdiff, buildDiffArgs(this.tools.backend, file1, file2, diffFile, options), {
+      cwd: path.dirname(path.resolve(diffFile)),
+      ...opts,
+    });
     if (result.exitCode !== 0 && result.exitCode !== 1) {
       const message = clean(result.stdout + '\n' + result.stderr) || `gdxdiff failed with exit code ${result.exitCode}`;
       throw new ToolError(message, result);

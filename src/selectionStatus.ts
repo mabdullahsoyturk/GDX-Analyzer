@@ -7,7 +7,7 @@ import { ShownStats, describeStats } from './query';
 
 /** The status bar item; shows the statistics of one owner (a viewer tab or comparison) at a time. */
 export class SelectionStatus implements vscode.Disposable {
-  private readonly item = vscode.window.createStatusBarItem('gdx.selection', vscode.StatusBarAlignment.Right, 100);
+  private readonly item = vscode.window.createStatusBarItem('gdxAnalyzer.selection', vscode.StatusBarAlignment.Right, 100);
   private owner?: object;
 
   constructor() {

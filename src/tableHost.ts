@@ -8,16 +8,16 @@ import { ColumnValues, TableView } from './table';
 export type { CopyRequest, SelectionRequest, WebviewQuery } from './query';
 
 export function pageSize(): number {
-  return Math.max(50, vscode.workspace.getConfiguration('gdx').get<number>('maxRowsPerPage', 500));
+  return Math.max(50, vscode.workspace.getConfiguration('gdxAnalyzer').get<number>('maxRowsPerPage', 500));
 }
 
 export function colPageSize(): number {
-  return Math.max(10, vscode.workspace.getConfiguration('gdx').get<number>('maxColumnsPerPage', 100));
+  return Math.max(10, vscode.workspace.getConfiguration('gdxAnalyzer').get<number>('maxColumnsPerPage', 100));
 }
 
-/** The default number format from the settings gdx.numberFormat.*. */
+/** The default number format from the settings gdxAnalyzer.numberFormat.*. */
 export function defaultFormat(): NumberFormat {
-  const cfg = vscode.workspace.getConfiguration('gdx.numberFormat');
+  const cfg = vscode.workspace.getConfiguration('gdxAnalyzer.numberFormat');
   return normalizeFormat({
     style: cfg.get<NumberStyle>('style', 'g'),
     precision: cfg.get<boolean>('fullPrecision', false) ? 'full' : cfg.get<number>('precision', 6),
@@ -25,9 +25,9 @@ export function defaultFormat(): NumberFormat {
   });
 }
 
-/** Setting gdx.squeezeDefaults. */
+/** Setting gdxAnalyzer.squeezeDefaults. */
 export function squeezeDefaults(): boolean {
-  return vscode.workspace.getConfiguration('gdx').get<boolean>('squeezeDefaults', false);
+  return vscode.workspace.getConfiguration('gdxAnalyzer').get<boolean>('squeezeDefaults', false);
 }
 
 /** A page of the list or table view, with the page sizes and number format from the settings. */
@@ -39,9 +39,9 @@ export function answerColumnValues(view: TableView, column: number): ColumnValue
   return view.columnValues(column);
 }
 
-/** The decimal separator for copied numbers (setting gdx.copy.decimalSeparator). */
+/** The decimal separator for copied numbers (setting gdxAnalyzer.copy.decimalSeparator). */
 export function copyDecimalSeparator(): string {
-  const cfg = vscode.workspace.getConfiguration('gdx.copy');
+  const cfg = vscode.workspace.getConfiguration('gdxAnalyzer.copy');
   switch (cfg.get<string>('decimalSeparator', 'period')) {
     case 'system':
       return new Intl.NumberFormat().formatToParts(1.5).find((p) => p.type === 'decimal')?.value ?? '.';
@@ -88,7 +88,7 @@ export class SelectionTracker implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (this.lastRequest && (e.affectsConfiguration('gdx.numberFormat') || e.affectsConfiguration('gdx.squeezeDefaults'))) {
+        if (this.lastRequest && (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults'))) {
           this.update(this.lastRequest.req, this.lastRequest.view);
         }
       }),
