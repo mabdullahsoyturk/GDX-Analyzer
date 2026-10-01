@@ -5,11 +5,11 @@
  * differing records with an extra dimension (dif1/dif2 for changed records, ins1/ins2 for
  * records of one file only).
  *
- * The files are read as Latin-1 (byte for byte), so that labels and texts in any encoding are
+ * The files are read byte for byte (RAW_BYTES), so that labels and texts in any encoding are
  * compared and written unchanged. No dependency on `vscode`.
  */
 import { Sp } from './columns';
-import { GdxReader, SymbolEntry } from './gdxReader';
+import { GdxReader, RAW_BYTES, SymbolEntry } from './gdxReader';
 import { GdxWriter, RAW, asciiLower } from './gdxWriter';
 import type { DiffOptions } from './tools';
 
@@ -112,7 +112,7 @@ export async function gdxDiff(file1: string, file2: string, diffFile: string, o:
   if (ids) out.push(`ID    : ${ids.join(' ')}`);
   if (skipIds) out.push(`SkipID: ${skipIds.join(' ')}`);
 
-  const [r1, r2] = await Promise.all([GdxReader.open(file1, 'latin1'), GdxReader.open(file2, 'latin1')]);
+  const [r1, r2] = await Promise.all([GdxReader.open(file1, RAW_BYTES), GdxReader.open(file2, RAW_BYTES)]);
   const writer = new GdxWriter('GDX Analyzer (native gdxdiff)', 'GDXDIFF');
 
   // One label table for both files: the labels of the difference file, then those of file 1 and 2.

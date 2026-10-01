@@ -8,7 +8,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { gdxDiff } from '../../gdxDiff';
-import { GdxReader } from '../../gdxReader';
+import { GdxReader, RAW_BYTES } from '../../gdxReader';
 import { dumpText } from '../../gdxText';
 import { GdxWriter, RAW } from '../../gdxWriter';
 import { parseDiffOutput } from '../../parse';
@@ -108,6 +108,15 @@ describe('native gdxdiff', () => {
     const ids = await compare('pair1.gdx', 'pair2.gdx', { ids: ['W', 'x'], skipIds: ['x'] });
     assert.deepEqual(ids.summary.entries.map((e) => e.symbol), ['w']);
     assert.match(ids.result.stdout, /^ID    : W x\nSkipID: x$/m);
+  });
+
+  it('keeps labels byte for byte, also bytes 0x80-0x9F of UTF-8 (ß is C3 9F)', async () => {
+    const raw = await GdxReader.open(fixture('edge.gdx'), RAW_BYTES);
+    assert.ok(raw.uels.some((u) => Buffer.from(u, 'latin1').equals(Buffer.from('süß', 'utf8'))));
+    const { reader } = await compare('native.gdx', 'types.gdx');
+    const written = await GdxReader.open(reader.file, 'utf-8');
+    assert.ok(written.uels.includes('süß'));
+    assert.ok(!written.uels.some((u) => u.includes('\ufffd')));
   });
 
   it('reports identical files and names the files compared', async () => {

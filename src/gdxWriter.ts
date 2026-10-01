@@ -1,8 +1,8 @@
 /**
  * Writes GDX files (format version 7, uncompressed) as the GDX library of GAMS does (see
  * https://github.com/GAMS-dev/gdx, src/gxfile.cpp, MIT license), for the difference files of
- * gdxDiff.ts. Strings are written byte for byte as Latin-1 (so that labels read with the
- * Latin-1 encoding are written unchanged, whatever their encoding).
+ * gdxDiff.ts. Strings are written one byte per character (so that labels read with RAW_BYTES of
+ * gdxReader.ts are written unchanged, whatever their encoding).
  *
  * No dependency on `vscode`.
  */

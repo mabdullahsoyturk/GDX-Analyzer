@@ -15,6 +15,13 @@ import type { GdxSymbol, SymbolColumns, SymbolType } from './parse';
 import { columnNames } from './parse';
 import { textDecoder } from './tools';
 
+/**
+ * The "encoding" that keeps labels and texts byte for byte, one character (0-255) per byte. Not the
+ * text decoder's latin1: that is windows-1252 in some Node.js versions, which maps bytes 0x80-0x9F
+ * to other characters.
+ */
+export const RAW_BYTES = 'x-raw-bytes';
+
 /** The file is not a GDX file, or one this reader does not support. */
 export class GdxFormatError extends Error {}
 
@@ -315,10 +322,18 @@ export class GdxReader {
     private readonly domainStrings: string[],
   ) {}
 
-  /** Opens a GDX file and reads its tables; labels and texts are decoded with `encoding`. */
+  /**
+   * Opens a GDX file and reads its tables; labels and texts are decoded with `encoding`, or kept
+   * byte for byte with RAW_BYTES (one character per byte, as gdxWriter.ts writes them back).
+   */
   static async open(file: string, encoding = 'utf-8'): Promise<GdxReader> {
-    const decoder = textDecoder(encoding);
-    const text = (b: Buffer) => (b.length ? decoder.decode(b) : '');
+    let text: (b: Buffer) => string;
+    if (encoding === RAW_BYTES) {
+      text = (b) => b.toString('latin1');
+    } else {
+      const decoder = textDecoder(encoding);
+      text = (b) => (b.length ? decoder.decode(b) : '');
+    }
     const fh = await fs.promises.open(file, 'r');
     try {
       const head = new Section(fh, 0, false);
