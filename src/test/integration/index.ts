@@ -64,6 +64,35 @@ const tests: [string, () => Promise<void>][] = [
     },
   ],
   [
+    'links GDX files and symbols in GAMS and Python source to the viewer',
+    async () => {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      const gms = await vscode.workspace.openTextDocument({
+        language: 'gams',
+        content: "* reads the fixture\n$gdxIn transport1\n$load a d=dist\n$gdxIn\nexecute_unload 'results.gdx', x;\n",
+      });
+      const links = await vscode.commands.executeCommand<vscode.DocumentLink[]>('vscode.executeLinkProvider', gms.uri);
+      assert.deepEqual(links.map((l) => gms.getText(l.range)).sort(), ['a', 'dist', 'results.gdx', 'transport1', 'x']);
+      // A link runs the command of its target with the candidate paths and the symbol.
+      const follow = (link: vscode.DocumentLink) => {
+        const target = link.target!;
+        assert.equal(target.scheme, 'command');
+        return vscode.commands.executeCommand(target.path, ...JSON.parse(decodeURIComponent(target.query)));
+      };
+      await follow(links.find((l) => gms.getText(l.range) === 'a')!);
+      const tab = await waitFor('viewer tab from a link', () => {
+        const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+        return input instanceof vscode.TabInputCustom && input.viewType === 'gdxAnalyzer.viewer' ? input : undefined;
+      });
+      assert.equal(tab.uri.fsPath, t1.fsPath);
+
+      const py = await vscode.workspace.openTextDocument({ language: 'python', content: 'from gamspy import Container\nm = Container(load_from="transport2.gdx")\n' });
+      const pyLinks = await vscode.commands.executeCommand<vscode.DocumentLink[]>('vscode.executeLinkProvider', py.uri);
+      assert.deepEqual(pyLinks.map((l) => py.getText(l.range)), ['transport2.gdx']);
+      assert.ok((await vscode.commands.getCommands(true)).includes('gdxAnalyzer.showSymbol'));
+    },
+  ],
+  [
     'registers the MCP server for AI agents',
     async () => {
       const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-analyzer');

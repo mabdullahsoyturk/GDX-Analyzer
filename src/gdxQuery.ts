@@ -10,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { GdxFileInfo, loadFileInfo, loadSymbolColumns } from './gdxFile';
 import { GdxSymbol, parseDiffOutput, parseDomainInfo, parseUelTable } from './parse';
-import { ColumnFilter, ColumnStats, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
+import { BOUND_TOLERANCE, ColumnFilter, ColumnStats, SOLUTION_FILTERS, SolutionFilter, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
 import { DiffOptions, GdxTools } from './tools';
 
 export interface ToolSpec {
@@ -51,6 +51,14 @@ const FILTERS = {
     ],
   },
 };
+const SOLUTION = {
+  type: 'string',
+  enum: [...SOLUTION_FILTERS],
+  description:
+    'Variables and equations only: keep the records with this solution status. "marginal": non-zero or Eps marginal (binding constraints, nonbasic variables); ' +
+    '"atLower"/"atUpper": the level is at its finite lower/upper bound; "infeasible": the level is outside its bounds; ' +
+    `"nonDefault": a field differs from its default. Bounds are compared with the tolerance ${BOUND_TOLERANCE} · max(1, |bound|).`,
+};
 const SEARCH = { type: 'string', description: 'Keep only records with a cell containing this text (case-insensitive; * and ? are wildcards).' };
 const LIMIT = { type: 'integer', minimum: 1, maximum: MAX_LIMIT, description: `Records per page (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}).` };
 const PAGE = { type: 'integer', minimum: 0, description: 'Page number, from 0 (default 0).' };
@@ -86,6 +94,7 @@ export const TOOL_SPECS: ToolSpec[] = [
         file: FILE,
         symbol: SYMBOL,
         filters: FILTERS,
+        solution: SOLUTION,
         search: SEARCH,
         sortBy: { type: 'string', description: 'Column to sort by (default: the order of the GDX file).' },
         descending: { type: 'boolean', description: 'Sort in descending order.' },
@@ -106,7 +115,7 @@ export const TOOL_SPECS: ToolSpec[] = [
       'per value column the count, sum, mean, min, max, number of zeros and counts of special values. Use it to check results without reading every record.',
     inputSchema: {
       type: 'object',
-      properties: { file: FILE, symbol: SYMBOL, filters: FILTERS, search: SEARCH },
+      properties: { file: FILE, symbol: SYMBOL, filters: FILTERS, solution: SOLUTION, search: SEARCH },
       required: ['file', 'symbol'],
       additionalProperties: false,
     },
@@ -334,6 +343,17 @@ export class GdxQueries {
     });
   }
 
+  private solution(view: TableView, arg: unknown): SolutionFilter | undefined {
+    if (arg === undefined || arg === null) return undefined;
+    if (!SOLUTION_FILTERS.includes(arg as SolutionFilter)) {
+      throw new QueryError(`Invalid "solution": use one of ${SOLUTION_FILTERS.join(', ')}.`);
+    }
+    if (!view.solutionFilters().some((f) => f.filter === arg)) {
+      throw new QueryError(`"solution": "${arg}" applies only to variables and equations with the fields it compares.`);
+    }
+    return arg as SolutionFilter;
+  }
+
   private paging(args: Record<string, unknown>): { limit: number; page: number } {
     const limit = typeof args.limit === 'number' ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(args.limit))) : DEFAULT_LIMIT;
     const page = typeof args.page === 'number' ? Math.max(0, Math.floor(args.page)) : 0;
@@ -390,6 +410,7 @@ export class GdxQueries {
     const result = view.query({
       filter: this.search(args.search),
       columnFilters: this.filters(view, args.filters),
+      solution: this.solution(view, args.solution),
       sortColumn: typeof args.sortBy === 'string' ? this.column(view, args.sortBy) : undefined,
       sortDescending: !!args.descending,
       hidden,
@@ -422,7 +443,7 @@ export class GdxQueries {
     const { file, stat } = this.file(args.file);
     const symbol = await this.symbol(file, stat, args.symbol);
     const view = await this.view(file, stat, symbol);
-    const stats = view.stats({ filter: this.search(args.search), columnFilters: this.filters(view, args.filters) });
+    const stats = view.stats({ filter: this.search(args.search), columnFilters: this.filters(view, args.filters), solution: this.solution(view, args.solution) });
     const lines = [this.describe(symbol), `${plural(stats.rows, 'record')}${stats.rows === view.length ? '' : ` match (${view.length.toLocaleString('en-US')} in total)`}`];
     const labels = stats.columns.filter((c) => c.kind !== 'value');
     const values = stats.columns.filter((c) => c.kind === 'value');

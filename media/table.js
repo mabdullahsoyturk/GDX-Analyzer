@@ -428,6 +428,37 @@
     return { content, focus: () => radios.find((l) => l.querySelector('input').checked).querySelector('input').focus() };
   }
 
+  /** Names and descriptions of the solution filters (SolutionFilter of src/table.ts). */
+  const SOLUTION_FILTERS = {
+    marginal: ['Non-zero marginal', 'The marginal is non-zero or EPS: binding constraints and nonbasic variables'],
+    atLower: ['At lower bound', 'The level is at its finite lower bound'],
+    atUpper: ['At upper bound', 'The level is at its finite upper bound'],
+    infeasible: ['Outside bounds', 'The level is below its lower or above its upper bound (infeasible)'],
+    nonDefault: ['Non-default', 'A field (level, marginal, bounds or scale) differs from its default value'],
+  };
+
+  /** Radio buttons for the solution filters of a variable or equation, with the number of records of each. */
+  function solutionContent(table) {
+    const info = table.solutionInfo || { filters: [] };
+    const fmt = new Intl.NumberFormat();
+    const options = [{ filter: undefined, count: table.lastPage ? table.lastPage.totalCount : undefined }, ...info.filters];
+    const radios = options.map(({ filter, count }) => {
+      const [label, title] = filter ? SOLUTION_FILTERS[filter] : ['All records', 'Do not filter by solution status'];
+      const r = h('input', { type: 'radio', name: 'gdx-solution', value: filter || '' });
+      r.checked = (info.active || undefined) === filter;
+      r.addEventListener('change', () => (table.setSolution(filter), table.closePopup(true)));
+      return h('label', { class: 'check', title }, r, label, count !== undefined ? h('span', { class: 'muted' }, ` (${fmt.format(count)})`) : null);
+    });
+    const content = h(
+      'div',
+      { class: 'filter-popup' },
+      h('div', { class: 'popup-title' }, 'Solution status'),
+      h('div', { class: 'col' }, ...radios),
+      h('div', { class: 'muted small' }, 'Counts are of all records. Levels and bounds are compared with a tolerance of 1e-6 (relative to bounds above 1); EPS counts as 0.'),
+    );
+    return { content, focus: () => radios.find((l) => l.querySelector('input').checked).querySelector('input').focus() };
+  }
+
   /** Title attribute for a formatted cell: its exact value, if the format changed it. */
   const exactTitle = (row, i) => (row.exact && row.exact[i] !== row.cells[i] ? row.exact[i] : undefined);
 
@@ -514,6 +545,8 @@
   const DEFAULT_STATE = () => ({
     search: { text: '' },
     columnFilters: [],
+    /** Variables and equations: a solution filter (SolutionFilter of src/table.ts). */
+    solution: undefined,
     sortColumn: undefined,
     sortDescending: false,
     hidden: [],
@@ -624,6 +657,9 @@
       this.tableButton = h('button', { class: 'seg', 'aria-pressed': 'false', title: 'Rows and columns by dimension', onclick: () => this.setView('table') }, 'Table');
       this.chartButton = h('button', { class: 'seg', 'aria-pressed': 'false', title: 'Bar, line or heatmap chart of the filtered records', onclick: () => this.setView('chart') }, 'Chart');
       this.viewToggle = h('span', { class: 'segmented', role: 'group', 'aria-label': 'View' }, this.listButton, this.tableButton, this.chartButton);
+      /** Solution filters of the shown symbol (SolutionInfo of src/query.ts). */
+      this.solutionInfo = { filters: [] };
+      this.solutionButton = h('button', { title: 'Show records by solution status: binding, at a bound, infeasible, non-default', onclick: () => this.openSolution() }, 'Solution ▾');
       this.fieldsButton = h('button', { title: 'Choose the fields to show', onclick: () => this.openFields() }, 'Fields ▾');
       this.formatButton = h('button', { title: 'Number format and precision', onclick: () => this.openFormat() }, 'Format ▾');
       this.clearButton = h('button', { title: 'Remove all column filters', onclick: () => this.clearFilters() }, 'Clear filters');
@@ -643,6 +679,7 @@
           this.selLabel,
           h('span', { class: 'spacer' }),
           this.viewToggle,
+          this.solutionButton,
           this.fieldsButton,
           this.formatButton,
           this.clearButton,
@@ -1101,7 +1138,7 @@
     shapeChanged() {
       const s = this.state;
       const rowSearch = s.search && s.search.filterRows ? s.search : null;
-      const key = JSON.stringify([rowSearch, s.columnFilters, s.sortColumn, s.sortDescending, s.hidden, s.view, s.rowDims, s.colDims, s.order]);
+      const key = JSON.stringify([rowSearch, s.columnFilters, s.solution, s.sortColumn, s.sortDescending, s.hidden, s.view, s.rowDims, s.colDims, s.order]);
       if (key !== this.shapeKey) {
         this.shapeKey = key;
         return true;
@@ -1124,6 +1161,7 @@
       this.findCurrent = undefined;
       this.searchInfo = null;
       this.columns = [];
+      this.solutionInfo = { filters: [] };
       this.sel = null;
       this.notifySelection();
       this.shapeKey = undefined;
@@ -1344,8 +1382,23 @@
       this.query();
     }
 
+    setSolution(filter) {
+      this.state.solution = filter;
+      this.state.page = 0;
+      this.state.colPage = 0;
+      this.query();
+    }
+
+    openSolution() {
+      const view = solutionContent(this);
+      this.closePopup();
+      this.popup = openPopup(this.solutionButton, view.content, { label: 'Solution status' });
+      view.focus();
+    }
+
     clearFilters() {
       this.state.columnFilters = [];
+      this.state.solution = undefined;
       this.state.page = 0;
       this.state.colPage = 0;
       this.query();
@@ -1480,7 +1533,11 @@
       this.fieldsButton.hidden = view === 'chart' || this.columns.filter((_, i) => this.isValueColumn(i)).length < 2;
       this.formatButton.hidden = !this.columns.some((c) => c.kind === 'value');
       this.formatButton.classList.toggle('active', !!this.state.format);
-      const n = this.state.columnFilters.length;
+      const solution = this.solutionInfo.active;
+      this.solutionButton.hidden = !this.solutionInfo.filters.length;
+      this.solutionButton.classList.toggle('active', !!solution);
+      this.solutionButton.textContent = `${solution ? SOLUTION_FILTERS[solution][0] : 'Solution'} ▾`;
+      const n = this.state.columnFilters.length + (solution ? 1 : 0);
       this.clearButton.hidden = n === 0;
       this.clearButton.textContent = `Clear filters (${n})`;
     }
@@ -1513,6 +1570,7 @@
       this.columns = p.allColumns;
       this.effectiveFormat = p.format;
       this.squeezeInfo = p.squeeze;
+      this.solutionInfo = p.solution || { filters: [] };
       this.state.page = p.page;
       if (p.kind === 'chart') {
         this.state.chart = p.chart;

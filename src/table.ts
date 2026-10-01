@@ -77,10 +77,28 @@ export interface RangeFilter {
 
 export type ColumnFilter = LabelFilter | RangeFilter;
 
+/**
+ * Filters on the solution status of variable and equation records, which compare the
+ * fields of a record (EPS counts as 0, except that an EPS marginal is non-zero):
+ * - `marginal`: the marginal is non-zero or EPS (binding constraints, nonbasic variables),
+ * - `atLower` / `atUpper`: the level is at its finite lower / upper bound,
+ * - `infeasible`: the level lies outside its bounds,
+ * - `nonDefault`: a field differs from its default value.
+ * Levels and bounds are compared with the tolerance BOUND_TOLERANCE · max(1, |bound|).
+ */
+export type SolutionFilter = 'marginal' | 'atLower' | 'atUpper' | 'infeasible' | 'nonDefault';
+
+export const SOLUTION_FILTERS: readonly SolutionFilter[] = ['marginal', 'atLower', 'atUpper', 'infeasible', 'nonDefault'];
+
+/** Tolerance of the bound tests of the solution filters, relative to the bound (absolute below 1). */
+export const BOUND_TOLERANCE = 1e-6;
+
 export interface RowSelection {
   /** Only rows with a cell matching this search (see search.ts); matched against the displayed values. */
   filter?: string | TextSearch;
   columnFilters?: ColumnFilter[];
+  /** Only variable/equation records with this solution status (ignored for other symbols). */
+  solution?: SolutionFilter;
   /** The number format of the view: searches match the values as displayed. */
   format?: NumberFormat;
 }
@@ -516,6 +534,10 @@ export class TableView {
         });
       }
     }
+    const solution = selection.solution ? this.solutionTest(selection.solution) : undefined;
+    if (solution) {
+      tests.push(solution);
+    }
     const rx = compileSearch(selection.filter);
     if (rx instanceof RegExp) {
       const show = this.formatter(selection.format);
@@ -541,7 +563,7 @@ export class TableView {
   /** Indexes of the rows matching the filters, in display order (cached for paging). */
   private indexFor(q: RowSelection & { sortColumn?: number; sortDescending?: boolean }): Int32Array {
     const searching = compileSearch(q.filter) !== undefined;
-    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], q.sortColumn, !!q.sortDescending, searching ? q.format : null]);
+    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, q.sortColumn, !!q.sortDescending, searching ? q.format : null]);
     if (key === this.lastKey) {
       return this.lastIndex;
     }
@@ -611,6 +633,106 @@ export class TableView {
       });
     }
     return this.squeezeCache;
+  }
+
+  /** The value column of a variable/equation field (none for other symbols and difference tables). */
+  private fieldColumn(name: string): number {
+    if (!this.table.defaults) {
+      return -1;
+    }
+    return this.table.columns.findIndex((c) => c.kind === 'value' && !c.side && !c.delta && c.name === name);
+  }
+
+  /** The numbers of a value column with EPS as 0, ±INF as ±Infinity and NA, UNDF and empty cells as NaN. */
+  private fieldValues(column: number): (row: number) => number {
+    const { values, special } = this.cells.numbers(column);
+    return (r) => {
+      switch (special[r]) {
+        case Sp.None:
+          return values[r];
+        case Sp.Eps:
+          return 0;
+        case Sp.PInf:
+          return Infinity;
+        case Sp.MInf:
+          return -Infinity;
+        default:
+          return NaN;
+      }
+    };
+  }
+
+  /** The row test of a solution filter; undefined if the symbol does not have the fields it needs. */
+  private solutionTest(f: SolutionFilter): ((row: number) => boolean) | undefined {
+    const slack = (b: number) => (Number.isFinite(b) ? BOUND_TOLERANCE * Math.max(1, Math.abs(b)) : 0);
+    if (f === 'marginal') {
+      const m = this.fieldColumn('Marginal');
+      if (m < 0) return undefined;
+      const { special } = this.cells.numbers(m);
+      const value = this.fieldValues(m);
+      return (r) => {
+        const x = value(r);
+        return special[r] === Sp.Eps || (x !== 0 && !Number.isNaN(x));
+      };
+    }
+    if (f === 'nonDefault') {
+      const defaults = this.table.defaults ?? [];
+      const tests = defaults.flatMap((d, c) => {
+        if (d === undefined) return [];
+        const sp = specialCode(d);
+        const x = Number(d);
+        const { values, special } = this.cells.numbers(c);
+        return [(r: number) => special[r] !== sp || (sp === Sp.None && values[r] !== x)];
+      });
+      return tests.length ? (r) => tests.some((t) => t(r)) : undefined;
+    }
+    const level = this.fieldColumn('Level');
+    const lower = this.fieldColumn('Lower');
+    const upper = this.fieldColumn('Upper');
+    if (level < 0 || lower < 0 || upper < 0) {
+      return undefined;
+    }
+    const l = this.fieldValues(level);
+    const lo = this.fieldValues(lower);
+    const up = this.fieldValues(upper);
+    switch (f) {
+      case 'atLower':
+        return (r) => {
+          const b = lo(r);
+          return Number.isFinite(b) && Math.abs(l(r) - b) <= slack(b);
+        };
+      case 'atUpper':
+        return (r) => {
+          const b = up(r);
+          return Number.isFinite(b) && Math.abs(l(r) - b) <= slack(b);
+        };
+      case 'infeasible':
+        return (r) => {
+          const x = l(r);
+          const a = lo(r);
+          const b = up(r);
+          return x < a - slack(a) || x > b + slack(b);
+        };
+    }
+  }
+
+  private solutionCache?: { filter: SolutionFilter; count: number }[];
+
+  /** The solution filters that apply to the symbol, with the number of records each shows (of all records). */
+  solutionFilters(): { filter: SolutionFilter; count: number }[] {
+    if (!this.solutionCache) {
+      const n = this.cells.length;
+      this.solutionCache = SOLUTION_FILTERS.flatMap((filter) => {
+        const test = this.solutionTest(filter);
+        if (!test) return [];
+        let count = 0;
+        for (let r = 0; r < n; r++) {
+          if (test(r)) count++;
+        }
+        return [{ filter, count }];
+      });
+    }
+    return this.solutionCache;
   }
 
   /** Columns that are shown: all key/status columns plus the value/text columns that are not hidden. */
@@ -994,11 +1116,11 @@ export class TableView {
   private pivotData(q: PivotQuery): PivotData {
     const { rowDims, colDims } = this.pivotDims(q.rowDims, q.colDims);
     const valueColumns = this.visibleColumns(q.hidden, q.squeeze, q.order).filter((i) => this.isValueColumn(i));
-    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], rowDims, colDims, valueColumns, !!this.uelRank, compileSearch(q.filter) ? q.format : null]);
+    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, rowDims, colDims, valueColumns, !!this.uelRank, compileSearch(q.filter) ? q.format : null]);
     if (key === this.lastPivotKey && this.lastPivot) {
       return this.lastPivot;
     }
-    const records = this.indexFor({ filter: q.filter, columnFilters: q.columnFilters, format: q.format });
+    const records = this.indexFor({ filter: q.filter, columnFilters: q.columnFilters, solution: q.solution, format: q.format });
     const rows = this.group(records, rowDims);
     const cols = this.group(records, colDims);
     // The records of each pivot row (CSR layout), with their column group.
@@ -1145,7 +1267,7 @@ export class TableView {
     }
     const columnIndex = this.visibleColumns(q.hidden, q.squeeze, q.order);
     const index = this.indexFor(q);
-    const key = JSON.stringify(['list', search, q.filter ?? '', q.columnFilters ?? [], q.sortColumn, !!q.sortDescending, columnIndex, q.format ?? null]);
+    const key = JSON.stringify(['list', search, q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, q.sortColumn, !!q.sortDescending, columnIndex, q.format ?? null]);
     return this.cachedFind(key, () => {
       const show = this.formatter(q.format);
       const numbers = canMatchNumbers(search);
@@ -1182,7 +1304,7 @@ export class TableView {
       return { hits: [], error: rx.error };
     }
     const p = this.pivotData({ ...q, pageSize: 1, colPageSize: 1 });
-    const key = JSON.stringify(['pivot', search, q.filter ?? '', q.columnFilters ?? [], p.rowDims, p.colDims, p.valueColumns, !!this.uelRank, q.format ?? null]);
+    const key = JSON.stringify(['pivot', search, q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, p.rowDims, p.colDims, p.valueColumns, !!this.uelRank, q.format ?? null]);
     return this.cachedFind(key, () => {
       const show = this.formatter(q.format);
       const hits: Hit[] = [];

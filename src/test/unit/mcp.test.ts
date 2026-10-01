@@ -70,6 +70,16 @@ describe('GDX queries for agents', { skip: resolved ? false : 'GAMS tools not fo
     assert.match(text, /^Upper,0,,,,,0,\+Inf: 3$/m);
   });
 
+  it('filters variables and equations by solution status', async () => {
+    const binding = await queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'supply', solution: 'marginal' });
+    assert.match(binding, /Rows 1-1 of 1 matching record \(2 in total\)/);
+    assert.match(binding, /i,Level,Marginal,Upper\nseattle,350,Eps,350$/);
+    const atLower = await queries.call('gdx_symbol_stats', { file: 'transport1.gdx', symbol: 'x', solution: 'atLower' });
+    assert.match(atLower, /2 records match \(6 in total\)/);
+    await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'a', solution: 'marginal' }), /applies only to variables and equations/);
+    await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', solution: 'binding' }), /Invalid "solution"/);
+  });
+
   it('compares files and shows the differing records of a symbol', async () => {
     const summary = await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport2.gdx' });
     assert.match(summary, /5 symbols differ/);

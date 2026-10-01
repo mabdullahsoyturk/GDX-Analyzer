@@ -63,5 +63,6 @@ The GitLab pipeline (`.gitlab-ci.yml`):
 | `src/dump.ts` | Read-only `gdxdump:` documents |
 | `src/export.ts`, `src/xlsx.ts` | Excel export (no dependencies) and GAMS Connect instructions |
 | `src/gdxQuery.ts`, `src/mcp.ts`, `src/mcpProvider.ts` | The MCP server for AI agents and its registration |
+| `src/gdxRefs.ts`, `src/links.ts` | GDX file and symbol references in GAMS and Python source, and their links to the viewer |
 | `media/` | Webview scripts (`table.js`, `chart.js`, `viewer.js`, `diff.js`) and styles |
 | `scripts/` | Fetching the bundled tools and packaging |

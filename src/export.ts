@@ -6,13 +6,14 @@
 import { NumberFormat, normalizeFormat } from './format';
 import type { GdxSymbol } from './parse';
 import { TextSearch } from './search';
-import { ColumnFilter, SpecialValue, TableView, specialOf } from './table';
+import { ColumnFilter, SolutionFilter, SpecialValue, TableView, specialOf } from './table';
 import { MAX_COLS, MAX_ROWS, Sheet, SheetCell, sheetNames } from './xlsx';
 
 /** The per-symbol view state of the webview (see media/table.js). */
 export interface SymbolViewState {
   view?: 'list' | 'table';
   columnFilters?: ColumnFilter[];
+  solution?: SolutionFilter;
   search?: TextSearch & { filterRows?: boolean };
   sortColumn?: number;
   sortDescending?: boolean;
@@ -57,6 +58,7 @@ function exportQuery(item: ExportItem, options: ExportOptions, defaults: ExportD
   const search = st.search?.text && st.search.filterRows ? st.search : undefined;
   return {
     columnFilters: options.applyFilters ? (st.columnFilters ?? []) : [],
+    solution: options.applyFilters ? st.solution : undefined,
     filter: options.applyFilters ? search : undefined,
     // Rows are matched against the displayed values, as in the viewer.
     format: st.format ? normalizeFormat(st.format, defaults.format) : defaults.format,
@@ -170,6 +172,9 @@ export function connectInstructions(gdxFile: string, xlsxFile: string, items: Ex
       }
       if (st.search?.text && st.search.filterRows) {
         notes.push(`the text search ${q(st.search.text)} is not applied`);
+      }
+      if (st.solution && item.view.solutionFilters().some((f) => f.filter === st.solution)) {
+        notes.push(`the solution filter ${q(st.solution)} is not applied`);
       }
       if (labelFilters.length || valueFilters.length) {
         const name = `${s.name}_filtered`;

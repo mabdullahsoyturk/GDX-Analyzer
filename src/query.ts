@@ -4,7 +4,7 @@
  */
 import { NumberFormat, formatNumber, normalizeFormat } from './format';
 import { TextSearch, compileSearch, isSearchError } from './search';
-import { CellSelection, ChartData, ChartSpec, ColumnFilter, CopyResult, Hit, PivotPage, SelectionStats, SpecialValue, TablePage, TableView } from './table';
+import { CellSelection, ChartData, ChartSpec, ColumnFilter, CopyResult, Hit, PivotPage, SelectionStats, SolutionFilter, SpecialValue, TablePage, TableView } from './table';
 
 /** Table state sent by the webview with each query. */
 export interface WebviewQuery {
@@ -15,6 +15,8 @@ export interface WebviewQuery {
   /** Older webviews: a text filter. */
   filter?: string;
   columnFilters?: ColumnFilter[];
+  /** Variables and equations: only records with this solution status. */
+  solution?: SolutionFilter;
   sortColumn?: number;
   sortDescending?: boolean;
   hidden?: number[];
@@ -52,6 +54,13 @@ export interface SqueezeInfo {
   columns: number[];
 }
 
+/** The solution filters of a variable or equation (none for other symbols), with the records each shows. */
+export interface SolutionInfo {
+  filters: { filter: SolutionFilter; count: number }[];
+  /** The filter of the query, if it applies to the symbol. */
+  active?: SolutionFilter;
+}
+
 export interface SearchInfo {
   /** Number of matches in the whole view (highlight mode). */
   count: number;
@@ -65,7 +74,7 @@ export interface SearchInfo {
 /** Chart data with the values also formatted in the number format of the view (null: no value). */
 export type ChartAnswer = ChartData & { series: (ChartData['series'][number] & { texts: (string | null)[] })[] };
 
-export type QueryAnswer = (TablePage | PivotPage | ChartAnswer) & { format: NumberFormat; search?: SearchInfo; squeeze: SqueezeInfo; seq?: number };
+export type QueryAnswer = (TablePage | PivotPage | ChartAnswer) & { format: NumberFormat; search?: SearchInfo; squeeze: SqueezeInfo; solution: SolutionInfo; seq?: number };
 
 export function isPivot(view: TableView, q: WebviewQuery): boolean {
   return q.view === 'table' && view.keyColumns.length > 0;
@@ -85,6 +94,11 @@ function squeezeInfo(view: TableView, q: WebviewQuery, byDefault = false): Squee
   return { available, active, columns: active ? view.squeezableColumns() : [] };
 }
 
+function solutionInfo(view: TableView, q: WebviewQuery): SolutionInfo {
+  const filters = view.solutionFilters();
+  return { filters, active: filters.some((f) => f.filter === q.solution) ? q.solution : undefined };
+}
+
 function effectiveFormat(q: WebviewQuery, defaults: NumberFormat): NumberFormat {
   return q.format ? normalizeFormat(q.format, defaults) : defaults;
 }
@@ -96,12 +110,13 @@ export function answerQuery(view: TableView, q: WebviewQuery, settings: QuerySet
     // Charts follow the filters and the "filter rows" search; highlighted matches do not apply.
     const data = view.chart({ ...q, ...rowSelection(q), format });
     const series = data.series.map((s) => ({ ...s, texts: s.values.map((v) => (v === null ? null : formatNumber(String(v), format))) }));
-    return { ...data, series, format, squeeze: squeezeInfo(view, q, settings.squeezeDefaults), seq: q.seq };
+    return { ...data, series, format, squeeze: squeezeInfo(view, q, settings.squeezeDefaults), solution: solutionInfo(view, q), seq: q.seq };
   }
   const pivot = isPivot(view, q);
   const rows = settings.pageSize;
   const cols = settings.colPageSize;
   const squeeze = squeezeInfo(view, q, settings.squeezeDefaults);
+  const solution = solutionInfo(view, q);
   const base = { ...q, ...rowSelection(q), format, squeeze: squeeze.active };
   let page = q.page;
   let offset = q.offset;
@@ -139,14 +154,14 @@ export function answerQuery(view: TableView, q: WebviewQuery, settings: QuerySet
       const inCols = h.c >= result.colOffset && h.c < result.colOffset + result.headers.length;
       return h.kind === 'row' ? inRows : h.kind === 'col' ? inCols : inRows && inCols;
     });
-    return { ...result, format, search, squeeze, seq: q.seq };
+    return { ...result, format, search, squeeze, solution, seq: q.seq };
   }
   if (q.search?.text) {
     // Filter mode: report an invalid regular expression (the rows are then not filtered).
     const rx = compileSearch(q.search);
     search = { count: 0, hits: [], error: isSearchError(rx) ? rx.error : undefined };
   }
-  return { ...run(), format, search, squeeze, seq: q.seq };
+  return { ...run(), format, search, squeeze, solution, seq: q.seq };
 }
 
 /** A copy request of a webview: cells of the current view (positions as in its pages). */

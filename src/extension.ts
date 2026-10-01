@@ -8,6 +8,7 @@ import { GdxService, describeTools } from './service';
 import { textDecoder } from './tools';
 import { ViewStateStore } from './viewState';
 import { GdxViewerProvider } from './viewer';
+import { registerLinks } from './links';
 import { registerMcpServer } from './mcpProvider';
 
 const LARGE_FILE_BYTES = 100 * 1024 * 1024;
@@ -47,6 +48,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   cleanupDiffStorage(context.globalStorageUri);
   registerMcpServer(context, service);
+  registerLinks(context, (uri, symbol) => guarded('Opening the GDX file failed', showInViewer)(uri, symbol), hasSymbol);
 
   /** The GDX file a command applies to: its argument, the active viewer or the active dump document. */
   function currentGdx(arg?: unknown): vscode.Uri | undefined {
@@ -125,6 +127,29 @@ export function activate(context: vscode.ExtensionContext) {
     }
     const doc = await vscode.workspace.openTextDocument(dumpUri(uri.fsPath, symbol));
     await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  /** Opens a GDX file in the viewer (or shows its open viewer), at a symbol if given. */
+  async function showInViewer(uri: vscode.Uri, symbol?: string) {
+    let session = viewer.sessionFor(uri);
+    if (session) {
+      session.reveal();
+    } else {
+      await vscode.commands.executeCommand('vscode.openWith', uri, GdxViewerProvider.viewType);
+      session = viewer.sessionFor(uri);
+    }
+    if (!session || !symbol) {
+      return;
+    }
+    await session.whenLoaded();
+    if (!session.showSymbol(symbol)) {
+      vscode.window.showWarningMessage(`${path.basename(uri.fsPath)} has no symbol ${symbol}.`);
+    }
+  }
+
+  async function hasSymbol(file: string, symbol: string): Promise<boolean> {
+    const wanted = symbol.toLowerCase();
+    return (await symbolsOf(vscode.Uri.file(file))).some((s) => s.name.toLowerCase() === wanted);
   }
 
   function compare(file1: vscode.Uri, file2: vscode.Uri) {

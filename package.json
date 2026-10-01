@@ -31,8 +31,22 @@
     "gdxdiff"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:gams",
+    "onLanguage:python"
+  ],
   "contributes": {
+    "languages": [
+      {
+        "id": "gams",
+        "aliases": [
+          "GAMS"
+        ],
+        "extensions": [
+          ".gms"
+        ]
+      }
+    ],
     "customEditors": [
       {
         "viewType": "gdxAnalyzer.viewer",
@@ -108,6 +122,16 @@
         "category": "GDX"
       },
       {
+        "command": "gdxAnalyzer.showSymbol",
+        "title": "Show Symbol in GDX File",
+        "category": "GDX"
+      },
+      {
+        "command": "gdxAnalyzer.showInViewer",
+        "title": "Show in GDX Analyzer",
+        "category": "GDX"
+      },
+      {
         "command": "gdxAnalyzer.showToolInfo",
         "title": "Show Tool Information",
         "category": "GDX"
@@ -151,6 +175,13 @@
           "group": "3_compare@12"
         }
       ],
+      "editor/context": [
+        {
+          "command": "gdxAnalyzer.showSymbol",
+          "when": "editorLangId == gams || editorLangId == python",
+          "group": "navigation@90"
+        }
+      ],
       "editor/title": [
         {
           "command": "gdxAnalyzer.dump",
@@ -171,6 +202,14 @@
         {
           "command": "gdxAnalyzer.compareWithSelected",
           "when": "false"
+        },
+        {
+          "command": "gdxAnalyzer.showInViewer",
+          "when": "false"
+        },
+        {
+          "command": "gdxAnalyzer.showSymbol",
+          "when": "editorLangId == gams || editorLangId == python"
         }
       ]
     },
@@ -219,6 +258,11 @@
             "gbk"
           ],
           "markdownDescription": "Encoding of the labels and explanatory texts in GDX files, e.g. `utf-8`, `windows-1252` (Latin-1) or `shift_jis`. GDX files store them as bytes as written by GAMS, so files created from sources in a legacy encoding show wrong characters with `utf-8`. Applies to the viewer, the comparison view and the gdxdump output. *GDX: Select Encoding of Labels…* picks one from a list."
+        },
+        "gdxAnalyzer.links.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Make GDX file names in GAMS and Python source clickable (e.g. `$gdxIn data.gdx`, `execute_unload 'out.gdx', x;` or `Container(\"out.gdx\")`), and the symbols read or written by `$load`, `execute_load`, `execute_unload` etc., to open them in the GDX viewer."
         },
         "gdxAnalyzer.maxRowsPerPage": {
           "type": "number",

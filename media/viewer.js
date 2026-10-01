@@ -435,6 +435,14 @@
       case 'openExport':
         openExport();
         break;
+      case 'selectSymbol': {
+        // From a link in GAMS or Python source.
+        if (!file) break;
+        select(m.name);
+        const row = symList.querySelector(`.sym.selected`);
+        if (row) row.scrollIntoView({ block: 'nearest' });
+        break;
+      }
       case 'resetState':
         states = {};
         symbolSearch.set({ text: '' });

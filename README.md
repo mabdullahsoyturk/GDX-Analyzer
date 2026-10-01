@@ -22,6 +22,9 @@ Windows, macOS and Linux, so no GAMS installation is needed.
 - **Built for large symbols.** Records load while you scroll, so symbols with millions of records stay responsive.
 - **Filters and search.** Filter labels from a checklist and numbers by range and special value. Search with
   wildcards, exact match or regular expressions, then jump between matches or show only matching rows.
+- **Solution status.** For variables and equations, show only the records with a non-zero marginal (binding
+  constraints), a level at its lower or upper bound, a level outside its bounds (infeasible), or a field that is not at
+  its default. Each choice shows how many records it matches.
 - **Exact numbers.** Values are read exactly. Choose the format per symbol (`g`, `f` or `e`, a precision, or full
   precision); sorting, filters and copies always use the exact values.
 - **Selection and copy.** Select cells, rows or columns and press Ctrl+C to paste them into Excel. The status bar
@@ -46,6 +49,15 @@ difference, and records that exist in only one file. Chart the differences, open
 or save the difference file. All gdxdiff options (tolerances, fields, symbols to compare or skip, and more) can be
 set per comparison.
 
+### Links from GAMS and Python source
+
+GDX file names in `.gms` and Python files are links (Ctrl+click) that open the file in the viewer:
+`$gdxIn data`, `execute_unload 'results.gdx', x;`, `gdx=out.gdx` on a `$call` line, or
+`Container(load_from="data.gdx")` in GAMSPy. The symbols read or written by `$load`, `$unLoad`, `execute_load`,
+`execute_unload` and similar statements are links to that symbol in the file. Put the cursor on any symbol name and
+run **GDX: Show Symbol in GDX File** (also in the editor context menu) to open it in a GDX file the document
+references. Relative names are looked up next to the document, then in the workspace folders.
+
 ### Export
 
 - **Excel:** write any symbols to an `.xlsx` workbook, one sheet each, laid out like their view, with exact values.
@@ -62,8 +74,8 @@ available to agent mode in VS Code automatically. For Claude Code, Cursor and ot
 | Tool | Description |
 | --- | --- |
 | `gdx_list_symbols` | The symbols of a file with type, dimension, domain, records and text |
-| `gdx_read_symbol` | Records as CSV with exact values; filters, search, sorting and paging |
-| `gdx_symbol_stats` | Distinct labels per dimension; count, sum, mean, min, max and special values per field |
+| `gdx_read_symbol` | Records as CSV with exact values; filters (including solution status), search, sorting and paging |
+| `gdx_symbol_stats` | Distinct labels per dimension; count, sum, mean, min, max and special values per field, optionally filtered |
 | `gdx_compare` | The differing symbols of two files, or the differing records of one symbol |
 
 ## Getting started
@@ -88,6 +100,7 @@ menu and the viewer.
 | Select Encoding of Labels… | Read labels and texts in another encoding (e.g. Latin-1) |
 | Reset Viewer State | Forget the saved view of a file |
 | Copy MCP Server Configuration for AI Agents… | Connect external AI agents |
+| Show Symbol in GDX File | Open the symbol under the cursor in a GDX file the GAMS or Python document references |
 | Show Tool Information | Show which gdxdump and gdxdiff are used |
 
 ## Settings
@@ -102,6 +115,7 @@ menu and the viewer.
 | `gdxAnalyzer.squeezeDefaults` | `false` | Hide variable and equation fields that have their default value in every record |
 | `gdxAnalyzer.rememberViewState` | `true` | Remember the view of each file after it is closed |
 | `gdxAnalyzer.copy.decimalSeparator` | `period` | Decimal separator of copied numbers: `period`, `system` or `custom` |
+| `gdxAnalyzer.links.enabled` | `true` | Links from GDX file and symbol names in GAMS and Python source to the viewer |
 | `gdxAnalyzer.maxRowsPerPage` | `500` | Rows loaded at once while scrolling |
 | `gdxAnalyzer.maxColumnsPerPage` | `100` | Columns per page in wide table views |
 | `gdxAnalyzer.diff.*` | | Default gdxdiff options: tolerances, field, set texts, defaults, domains, UEL order |

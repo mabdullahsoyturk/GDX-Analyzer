@@ -41,6 +41,9 @@ class ViewerSession implements vscode.Disposable {
   selectedSymbol?: string;
   private loaded!: Promise<void>;
   private markLoaded!: () => void;
+  /** The webview has been sent the file (it is discarded while the tab is hidden and loads the file again). */
+  private webviewHasFile = false;
+  private pendingSymbol?: string;
 
   constructor(
     private readonly service: GdxService,
@@ -60,6 +63,9 @@ class ViewerSession implements vscode.Disposable {
       watcher.onDidCreate(() => this.scheduleReload()),
       watcher.onDidDelete(() => this.post({ type: 'fileError', message: 'The file has been deleted.' })),
       panel.webview.onDidReceiveMessage((m: FromWebview) => this.onMessage(m)),
+      panel.onDidChangeViewState(() => {
+        if (!panel.visible) this.webviewHasFile = false;
+      }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         // Pages are formatted by the extension: ask the webview for the current page again.
         if (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults') || e.affectsConfiguration('gdxAnalyzer.maxRowsPerPage') || e.affectsConfiguration('gdxAnalyzer.maxColumnsPerPage')) {
@@ -80,6 +86,33 @@ class ViewerSession implements vscode.Disposable {
   /** Resolves once the file has been read (and the webview shows it). */
   whenLoaded(): Promise<void> {
     return this.loaded;
+  }
+
+  /**
+   * Shows the viewer tab at a symbol (matched case-insensitively, like GAMS names);
+   * returns false if the file has no such symbol.
+   */
+  showSymbol(name: string): boolean {
+    this.reveal();
+    const wanted = name.toLowerCase();
+    const symbol = name === UNIVERSE ? { name } : this.symbols.find((s) => s.name.toLowerCase() === wanted);
+    if (symbol) {
+      this.pendingSymbol = symbol.name;
+      this.sendPendingSymbol();
+    }
+    return !!symbol;
+  }
+
+  /** Selects the symbol asked for by showSymbol once the webview shows the file. */
+  private sendPendingSymbol() {
+    if (this.pendingSymbol && this.webviewHasFile) {
+      this.post({ type: 'selectSymbol', name: this.pendingSymbol });
+      this.pendingSymbol = undefined;
+    }
+  }
+
+  reveal() {
+    this.panel.reveal();
   }
 
   /** Opens the export dialog of the webview. */
@@ -181,6 +214,9 @@ class ViewerSession implements vscode.Disposable {
         symbols: [universeSymbol(info.version), ...info.symbols],
         pageSize: pageSize(),
       });
+      // A hidden webview does not receive it: it asks again ('ready') when shown.
+      this.webviewHasFile = this.panel.visible;
+      this.sendPendingSymbol();
     } catch (err) {
       if (gen === this.generation) {
         this.info = undefined;
