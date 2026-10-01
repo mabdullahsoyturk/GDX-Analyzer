@@ -17,6 +17,17 @@
 - **GAMSPy and GAMS Transfer symbols are links:** those of `read()`, `write()` and `loadRecordsFromGdx()`
   (`symbol_names=`, `symbols=` or a list after the file) and `m["x"]` of a container read from a file.
 - **Notebooks:** links, hovers and **GDX: Show Symbol in GDX File** also find the GDX files read in other cells.
+- **Native GDX reader:** GDX files are read by the extension itself instead of gdxdump: 5 to 9 times faster (10
+  million records in 0.4 s instead of 3.8 s), and without gdxdump, so the viewer, hovers, the solution report and the
+  MCP server work on any platform without GAMS. It reads the GDX file formats 5 to 7, compressed or not, and gives
+  the same records as gdxdump. Text dumps (**Dump to Text**, the text diff of comparisons) and **Export Symbol to
+  CSV** are written natively too, in gdxdump's format and as fast. Comparisons still use gdxdiff. Setting
+  `gdxAnalyzer.reader` (`native` or `gdxdump`); `GDX_READER` for the MCP server.
+
+### Fixed
+
+- The universe of files with more than 999 unique elements showed 0 labels (gdxdump writes the count as 1,000).
+- Text dumps of files with acronyms declare all of them (gdxdump writes an empty first one and leaves out the last).
 
 ## 0.9.1
 

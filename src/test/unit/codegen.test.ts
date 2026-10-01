@@ -5,8 +5,8 @@ import * as path from 'node:path';
 import { describe, it } from 'node:test';
 import { CodeLanguage, domainLabels, symbolCode } from '../../codegen';
 import type { SymbolViewState } from '../../export';
-import { loadFileInfo, loadSymbolColumns } from '../../gdxFile';
-import { GdxSymbol, parseUelTable } from '../../parse';
+import { loadFileInfo, loadSymbolColumns, loadUels } from '../../gdxFile';
+import { GdxSymbol } from '../../parse';
 import { TableView, columnTable, symbolTable } from '../../table';
 import { GdxTools, resolveTools } from '../../tools';
 
@@ -89,11 +89,12 @@ describe('copy as code: the code gives the records of the view', { skip: python 
   const file = path.join(fixtures, 'transport1.gdx');
 
   async function viewOf(name: string) {
-    const info = await loadFileInfo(tools!, file);
+    const source = { encoding: 'utf-8', tools: () => tools! };
+    const info = await loadFileInfo(source, file);
     const symbol = info.symbols.find((s) => s.name === name)!;
-    const data = await loadSymbolColumns(tools!, file, symbol);
+    const data = await loadSymbolColumns(source, file, symbol);
     const view = new TableView(columnTable(data.columns, data.keyCount, data.store, symbol));
-    view.setUelOrder(parseUelTable(await tools!.dump(file, { uelTable: 'uels', noData: true })));
+    view.setUelOrder(await loadUels(source, file));
     return { symbol, view };
   }
 

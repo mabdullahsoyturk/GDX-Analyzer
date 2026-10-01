@@ -9,7 +9,7 @@ interface DumpTarget {
   symbol?: string;
 }
 
-/** Virtual, read-only document with the gdxdump output of a file or one of its symbols. */
+/** Virtual, read-only document with the gdxdump output of a file or one of its symbols (written natively unless set otherwise). */
 export function dumpUri(file: string, symbol?: string): vscode.Uri {
   const base = path.basename(file);
   const label = symbol ? `${base} - ${symbol}.gms` : `${base}.gms`;
@@ -37,7 +37,7 @@ export class GdxDumpProvider implements vscode.TextDocumentContentProvider, vsco
     this.disposables.push(
       vscode.workspace.onDidCloseTextDocument(() => this.pruneWatchers()),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('gdxAnalyzer.encoding')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.reader')) {
           this.refresh(() => true);
         }
       }),
@@ -56,12 +56,12 @@ export class GdxDumpProvider implements vscode.TextDocumentContentProvider, vsco
     const sub = token.onCancellationRequested(() => abort.abort());
     try {
       return await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Window, title: `gdxdump ${path.basename(file)}${symbol ? ' ' + symbol : ''}` },
-        () => this.service.tools().dump(file, { symbol }, { signal: abort.signal }),
+        { location: vscode.ProgressLocation.Window, title: `Dumping ${path.basename(file)}${symbol ? ' ' + symbol : ''}` },
+        () => this.service.dumpText(file, symbol, abort.signal),
       );
     } catch (err) {
       this.service.log(`Error dumping ${file}: ${errorMessage(err)}`);
-      return `* gdxdump failed for ${file}${symbol ? ` (symbol ${symbol})` : ''}:\n*\n` +
+      return `* Dumping ${file}${symbol ? ` (symbol ${symbol})` : ''} failed:\n*\n` +
         errorMessage(err).split(/\r?\n/).map((l) => `* ${l}`).join('\n') + '\n';
     } finally {
       sub.dispose();

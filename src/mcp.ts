@@ -8,6 +8,7 @@
  *   GDX_GAMS_SYSTEM_DIRECTORY  GAMS system directory with gdxdump and gdxdiff
  *   GDX_GAMSPY_EXECUTABLE      gamspy executable (or its virtual environment)
  *   GDX_ENCODING               encoding of labels and texts (default utf-8)
+ *   GDX_READER                 native (default) or gdxdump: how GDX files are read (gdxdiff always compares them)
  *
  * The protocol is newline-delimited JSON-RPC 2.0 on stdin/stdout; logs go to stderr.
  * No dependency on `vscode`.
@@ -54,7 +55,15 @@ export class McpServer {
   ) {
     this.env = options.env ?? process.env;
     this.log = options.log ?? ((l) => process.stderr.write(l + '\n'));
-    this.queries = new GdxQueries(() => this.tools(), options.cwd ?? process.cwd());
+    this.queries = new GdxQueries(
+      {
+        encoding: this.env.GDX_ENCODING?.trim() || 'utf-8',
+        useGdxdump: this.env.GDX_READER?.trim().toLowerCase() === 'gdxdump',
+        tools: () => this.tools(),
+        log: (l) => this.log(l),
+      },
+      options.cwd ?? process.cwd(),
+    );
   }
 
   dispose() {

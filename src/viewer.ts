@@ -2,8 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { GdxSymbol, parseUelTable } from './parse';
-import { GdxFileInfo, GdxService, describeTools, errorMessage } from './service';
+import { GdxSymbol } from './parse';
+import { GdxFileInfo, GdxService, errorMessage } from './service';
 import { TableView, UNIVERSE, cachedView, columnTable, universeSymbol, universeTable } from './table';
 import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, defaultFormat, pageSize, saveChartImage, squeezeDefaults } from './tableHost';
 import { ExportItem, ExportOptions, SymbolViewState, buildSheets, connectInstructions } from './export';
@@ -83,7 +83,7 @@ class ViewerSession implements vscode.Disposable {
         if (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults') || e.affectsConfiguration('gdxAnalyzer.maxRowsPerPage') || e.affectsConfiguration('gdxAnalyzer.maxColumnsPerPage')) {
           panel.webview.postMessage({ type: 'requery' });
         }
-        if (e.affectsConfiguration('gdxAnalyzer.encoding')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.reader')) {
           this.load();
         }
       }),
@@ -163,7 +163,7 @@ class ViewerSession implements vscode.Disposable {
       const abort = (this.reportAbort = new AbortController());
       // In a promise: finding the tools may fail, which the report then shows.
       const report = Promise.resolve().then(() =>
-        solutionReport(this.service.tools(), this.uri.fsPath, info.symbols, {
+        solutionReport(this.service.source(), this.uri.fsPath, info.symbols, {
           signal: abort.signal,
           // Symbols the viewer has in memory are not read again.
           cached: (symbol) => this.views.get(symbol.name),
@@ -301,7 +301,6 @@ class ViewerSession implements vscode.Disposable {
     this.report = undefined;
     this.selection.reset();
     try {
-      const tools = this.service.tools();
       const info = await this.service.loadFile(this.uri.fsPath);
       if (gen !== this.generation) {
         return;
@@ -314,7 +313,7 @@ class ViewerSession implements vscode.Disposable {
         savedState: this.remembered() ? this.states.get(this.uri.fsPath) : undefined,
         fileName: path.basename(this.uri.fsPath),
         filePath: this.copyOf ? this.copyOf.toString(true) : this.uri.fsPath,
-        tools: describeTools(tools.tools),
+        tools: this.service.describeReader(),
         version: info.version,
         symbols: [universeSymbol(info.version), ...info.symbols],
         pageSize: pageSize(),
@@ -359,10 +358,7 @@ class ViewerSession implements vscode.Disposable {
   /** The unique elements of the file in GDX order. */
   private loadUels(): Promise<string[]> {
     if (!this.uels) {
-      this.uels = this.service
-        .tools()
-        .dump(this.uri.fsPath, { uelTable: 'uels', noData: true })
-        .then(parseUelTable);
+      this.uels = this.service.loadUels(this.uri.fsPath);
       this.uels.catch(() => (this.uels = undefined));
     }
     return this.uels;

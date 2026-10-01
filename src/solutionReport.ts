@@ -7,10 +7,9 @@
  */
 import { numberText } from './columns';
 import { NumberFormat, formatNumber } from './format';
-import { loadSymbolColumns } from './gdxFile';
+import { GdxSource, loadSymbolColumns } from './gdxFile';
 import type { GdxSymbol } from './parse';
 import { SolutionFilter, SolutionRecord, TableView, columnTable } from './table';
-import { GdxTools } from './tools';
 
 /** Most records of each list of the report (the records outside their bounds and the binding constraints). */
 export const MAX_REPORT_RECORDS = 1000;
@@ -147,14 +146,14 @@ export interface ReportOptions {
  * The solution report of the variables and equations among `symbols` of a GDX file. The records
  * of each symbol are read and summarized one after another (a few at once), and not kept.
  */
-export async function solutionReport(tools: GdxTools, file: string, symbols: GdxSymbol[], options: ReportOptions = {}): Promise<SolutionReport> {
+export async function solutionReport(source: GdxSource, file: string, symbols: GdxSymbol[], options: ReportOptions = {}): Promise<SolutionReport> {
   const top = Math.min(MAX_REPORT_RECORDS, Math.max(1, Math.floor(options.top ?? MAX_REPORT_RECORDS)));
   // In the order of the file (gdxdump lists the symbols by name).
   const candidates = symbols.filter(isSolutionSymbol).sort((a, b) => (a.entry ?? 0) - (b.entry ?? 0));
   const builder = new SolutionReportBuilder(candidates, top);
   const read = (symbol: GdxSymbol) =>
     options.cached?.(symbol) ??
-    loadSymbolColumns(tools, file, symbol, options.signal).then((data) => new TableView(columnTable(data.columns, data.keyCount, data.store, symbol)));
+    loadSymbolColumns(source, file, symbol, options.signal).then((data) => new TableView(columnTable(data.columns, data.keyCount, data.store, symbol)));
   let next = 0;
   let done = 0;
   const worker = async () => {

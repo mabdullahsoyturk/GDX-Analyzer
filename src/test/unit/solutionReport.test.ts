@@ -6,7 +6,6 @@ import { loadFileInfo } from '../../gdxFile';
 import type { GdxSymbol } from '../../parse';
 import { SolutionReportBuilder, recordName, showReport, solutionReport } from '../../solutionReport';
 import { TableView, TopRows, symbolTable } from '../../table';
-import { GdxTools, ResolvedTools, resolveTools } from '../../tools';
 
 const FIELDS = ['Level', 'Marginal', 'Lower', 'Upper', 'Scale'];
 
@@ -156,24 +155,16 @@ describe('solution report', () => {
   });
 });
 
-function tryResolve(): ResolvedTools | undefined {
-  try {
-    return resolveTools({ backend: 'gams', gamsSystemDirectory: process.env.GDX_TEST_GAMS_DIR });
-  } catch {
-    return undefined;
-  }
-}
+/** Reads natively: no gdxdump needed. */
+const source = { encoding: 'utf-8', tools: () => assert.fail('the native reader needs no tools') };
 
-const resolved = tryResolve();
-
-describe('solution report of a GDX file', { skip: resolved ? false : 'GAMS tools not found' }, () => {
-  const file = path.resolve(__dirname, '../../../test/fixtures/solution.gdx');
+describe('solution report of a GDX file', () => {
+  const file = path.join(__dirname, '../../../test/fixtures/solution.gdx');
 
   it('reads all variables and equations, a few at once, with progress', async () => {
-    const tools = new GdxTools(resolved!);
-    const { symbols } = await loadFileInfo(tools, file);
+    const { symbols } = await loadFileInfo(source, file);
     const progress: number[] = [];
-    const report = await solutionReport(tools, file, symbols, { top: 2, concurrency: 2, onProgress: (done, total) => progress.push(done / total) });
+    const report = await solutionReport(source, file, symbols, { top: 2, concurrency: 2, onProgress: (done, total) => progress.push(done / total) });
     assert.deepEqual(report.symbols.map((s) => s.name), ['x', 'z', 'y', 'cap', 'bal']);
     assert.deepEqual(progress, [0.2, 0.4, 0.6, 0.8, 1]);
     assert.equal(report.infeasibleCount, 4);
@@ -186,10 +177,9 @@ describe('solution report of a GDX file', { skip: resolved ? false : 'GAMS tools
   });
 
   it('stops when aborted', async () => {
-    const tools = new GdxTools(resolved!);
-    const { symbols } = await loadFileInfo(tools, file);
+    const { symbols } = await loadFileInfo(source, file);
     const abort = new AbortController();
     abort.abort();
-    await assert.rejects(solutionReport(tools, file, symbols, { signal: abort.signal }));
+    await assert.rejects(solutionReport(source, file, symbols, { signal: abort.signal }));
   });
 });

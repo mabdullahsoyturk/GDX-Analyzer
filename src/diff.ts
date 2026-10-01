@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { dumpUri } from './dump';
-import { DiffSummary, GdxSymbol, parseDiffOutput, parseDomainInfo, parseSymbols } from './parse';
+import { DiffSummary, GdxSymbol, parseDiffOutput } from './parse';
 import { GdxService, describeTools, errorMessage } from './service';
 import { TableView, cachedView, diffColumnTable } from './table';
 import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage } from './tableHost';
@@ -119,7 +119,7 @@ export class DiffPanel implements vscode.Disposable {
         if (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults') || e.affectsConfiguration('gdxAnalyzer.maxRowsPerPage') || e.affectsConfiguration('gdxAnalyzer.maxColumnsPerPage')) {
           this.panel.webview.postMessage({ type: 'requery' });
         }
-        if (e.affectsConfiguration('gdxAnalyzer.encoding')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.reader')) {
           // The labels are read again with the new encoding.
           this.views = new Map();
           this.panel.webview.postMessage({ type: 'requery' });
@@ -179,13 +179,13 @@ export class DiffPanel implements vscode.Disposable {
         () =>
           Promise.all([
             tools.diff(this.file1, this.file2, this.diffFile, options, { signal: abort.signal }),
-            tools.dump(this.file1, { symbols: true }).then(parseSymbols),
-            tools.dump(this.file2, { symbols: true }).then(parseSymbols),
+            this.service.loadSymbolList(this.file1),
+            this.service.loadSymbolList(this.file2),
           ]),
       );
       const summary = parseDiffOutput(result.stdout);
       const diffSymbols =
-        result.exitCode === 1 && fs.existsSync(this.diffFile) ? parseSymbols(await tools.dump(this.diffFile, { symbols: true })) : [];
+        result.exitCode === 1 && fs.existsSync(this.diffFile) ? await this.service.loadSymbolList(this.diffFile) : [];
       if (gen !== this.generation) {
         return;
       }
@@ -260,11 +260,7 @@ export class DiffPanel implements vscode.Disposable {
 
   private async domainOf(name: string, dim: number): Promise<string[]> {
     if (!this.domainCache) {
-      this.domainCache = this.service
-        .tools()
-        .dump(this.file1, { domainInfo: true })
-        .then((t) => new Map([...parseDomainInfo(t)].map(([k, v]) => [k, v.domain])))
-        .catch(() => new Map());
+      this.domainCache = this.service.loadDomains(this.file1).catch(() => new Map());
     }
     const domain = (await this.domainCache).get(name.toLowerCase());
     return domain && domain.length === dim ? domain : Array(dim).fill('*');

@@ -51,7 +51,19 @@ const tests: [string, () => Promise<void>][] = [
       assert.equal(tab.uri.fsPath, t1.fsPath);
     },
   ],
-  ['dumps files and symbols (GAMS backend)', () => dumpTests('gams')],
+  ['dumps files and symbols natively', () => dumpTests('native')],
+  [
+    'dumps files and symbols with gdxdump (GAMS backend)',
+    async () => {
+      const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
+      await cfg.update('reader', 'gdxdump', vscode.ConfigurationTarget.Global);
+      try {
+        await dumpTests('gams');
+      } finally {
+        await cfg.update('reader', undefined, vscode.ConfigurationTarget.Global);
+      }
+    },
+  ],
   [
     'compares files without errors',
     async () => {
@@ -219,6 +231,29 @@ const tests: [string, () => Promise<void>][] = [
     },
   ],
   [
+    'reads GDX files natively, without gdxdump',
+    async () => {
+      const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
+      await cfg.update('backend', 'gams', vscode.ConfigurationTarget.Global);
+      await cfg.update('gamsSystemDirectory', path.join(fixtures, 'no-gams-here'), vscode.ConfigurationTarget.Global);
+      try {
+        const gms = await vscode.workspace.openTextDocument({ language: 'gams', content: '$gdxIn solution\n$load cap\n' });
+        const hovers = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', gms.uri, new vscode.Position(1, 7));
+        const text = hovers.flatMap((h) => h.contents.map((c) => (typeof c === 'string' ? c : c.value))).join('\n');
+        assert.match(text, /\*\*cap\(i\)\*\* · Equation · 4 records/);
+        assert.match(text, /Solution: \*\*1 record outside bounds\*\*/);
+        // Text dumps are written natively too.
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('gdxAnalyzer.dumpSymbol', vscode.Uri.file(path.join(fixtures, 'solution.gdx')), 'cap');
+        const dump = await waitFor('native dump', () => (activeText()?.includes('Equation cap') ? activeText() : undefined));
+        assert.match(dump, /^Equation cap\(\*\) capacity \/\n'i1'\.L 10, \n'i1'\.M -3, \n'i1'\.LO -Inf, \n'i1'\.UP 10,/m);
+      } finally {
+        await cfg.update('backend', undefined, vscode.ConfigurationTarget.Global);
+        await cfg.update('gamsSystemDirectory', undefined, vscode.ConfigurationTarget.Global);
+      }
+    },
+  ],
+  [
     'registers the MCP server for AI agents',
     async () => {
       const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-analyzer');
@@ -256,11 +291,13 @@ const tests: [string, () => Promise<void>][] = [
       const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
       await cfg.update('backend', 'gamspy', vscode.ConfigurationTarget.Global);
       await cfg.update('gamspyExecutable', gamspy, vscode.ConfigurationTarget.Global);
+      await cfg.update('reader', 'gdxdump', vscode.ConfigurationTarget.Global);
       try {
         await dumpTests('gamspy');
       } finally {
         await cfg.update('backend', undefined, vscode.ConfigurationTarget.Global);
         await cfg.update('gamspyExecutable', undefined, vscode.ConfigurationTarget.Global);
+        await cfg.update('reader', undefined, vscode.ConfigurationTarget.Global);
       }
     },
   ],

@@ -7,9 +7,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { GdxFileInfo } from './gdxFile';
-import { GdxSymbol, parseUelTable } from './parse';
+import { GdxSymbol } from './parse';
 import { baseAfterRemoval, scenarioNames, scenarioTable } from './scenario';
-import { GdxService, describeTools, errorMessage } from './service';
+import { GdxService, errorMessage } from './service';
 import { TableView, cachedView } from './table';
 import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage } from './tableHost';
 import { PROTOCOL, webviewHtml } from './webview';
@@ -76,7 +76,7 @@ export class ScenarioPanel implements vscode.Disposable {
         if (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults') || e.affectsConfiguration('gdxAnalyzer.maxRowsPerPage') || e.affectsConfiguration('gdxAnalyzer.maxColumnsPerPage')) {
           this.post({ type: 'requery' });
         }
-        if (e.affectsConfiguration('gdxAnalyzer.encoding')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.reader')) {
           this.load();
         }
       }),
@@ -120,7 +120,6 @@ export class ScenarioPanel implements vscode.Disposable {
     this.selection.reset();
     this.panel.title = this.title();
     this.watch();
-    const tools = this.service.tools();
     const results = await Promise.allSettled(this.files.map((f) => this.service.loadFile(f)));
     if (gen !== this.generation) {
       return;
@@ -140,7 +139,7 @@ export class ScenarioPanel implements vscode.Disposable {
         }
       }
     });
-    this.post({ type: 'scenarios', protocol: PROTOCOL, files, base: this.base, symbols, tools: describeTools(tools.tools), pageSize: pageSize() });
+    this.post({ type: 'scenarios', protocol: PROTOCOL, files, base: this.base, symbols, tools: this.service.describeReader(), pageSize: pageSize() });
   }
 
   /** The labels of all files in GDX order (the base first), for the table view and charts. */
@@ -150,11 +149,7 @@ export class ScenarioPanel implements vscode.Disposable {
       this.uels = Promise.all(
         order.map((i) =>
           this.infos[i]
-            ? this.service
-                .tools()
-                .dump(this.files[i], { uelTable: 'uels', noData: true })
-                .then(parseUelTable)
-                .catch(() => [] as string[])
+            ? this.service.loadUels(this.files[i]).catch(() => [] as string[])
             : Promise.resolve([] as string[]),
         ),
       ).then((lists) => [...new Set(lists.flat())]);

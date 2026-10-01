@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GdxFileInfo, loadFileInfo, loadSymbolColumns } from './gdxFile';
+import { GdxFileInfo, GdxSource, loadDomains, loadDumpText, loadFileInfo, loadSymbolColumns, loadSymbolCsv, loadSymbolList, loadUels } from './gdxFile';
 import { GdxSymbol, SymbolColumns } from './parse';
 import { SelectionStatus } from './selectionStatus';
 import { BackendSetting, GdxTools, ResolvedTools, ToolNotFoundError, resolveTools } from './tools';
@@ -45,20 +45,72 @@ export class GdxService implements vscode.Disposable {
         gamspyExecutable: cfg.get<string>('gamspyExecutable', ''),
         venvSearchRoots: (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath),
       });
-      const encoding = cfg.get<string>('encoding', 'utf-8').trim() || 'utf-8';
+      const encoding = this.encoding();
       this.log(`Using ${describeTools(resolved)}${encoding.toLowerCase().replace('-', '') === 'utf8' ? '' : `, reading GDX labels as ${encoding}`}`);
       this.cached = new GdxTools(resolved, (l) => this.log(l), encoding);
     }
     return this.cached;
   }
 
+  /** Setting gdxAnalyzer.encoding. */
+  private encoding(): string {
+    return vscode.workspace.getConfiguration('gdxAnalyzer').get<string>('encoding', 'utf-8').trim() || 'utf-8';
+  }
+
+  /** Setting gdxAnalyzer.reader: read GDX files with gdxdump instead of natively. */
+  private useGdxdump(): boolean {
+    return vscode.workspace.getConfiguration('gdxAnalyzer').get<string>('reader', 'native') === 'gdxdump';
+  }
+
+  /** How GDX files are read (natively unless set otherwise; the tools are only resolved when needed). */
+  source(): GdxSource {
+    return { encoding: this.encoding(), useGdxdump: this.useGdxdump(), tools: () => this.tools(), log: (l) => this.log(l) };
+  }
+
+  /** How GDX files are read, for the headers of the viewer and the comparisons. */
+  describeReader(): string {
+    if (this.useGdxdump()) {
+      return describeTools(this.tools().tools);
+    }
+    try {
+      return `native GDX reader · ${describeTools(this.tools().tools)}`;
+    } catch {
+      return 'native GDX reader (no gdxdump/gdxdiff found)';
+    }
+  }
+
   loadFile(file: string): Promise<GdxFileInfo> {
-    return loadFileInfo(this.tools(), file);
+    return loadFileInfo(this.source(), file);
   }
 
   /** The records of a symbol in compact columns (see gdxFile.ts). */
-  loadSymbolColumns(file: string, symbol: GdxSymbol): Promise<SymbolColumns> {
-    return loadSymbolColumns(this.tools(), file, symbol);
+  loadSymbolColumns(file: string, symbol: GdxSymbol, signal?: AbortSignal): Promise<SymbolColumns> {
+    return loadSymbolColumns(this.source(), file, symbol, signal);
+  }
+
+  /** The unique elements of a file in GDX order. */
+  loadUels(file: string): Promise<string[]> {
+    return loadUels(this.source(), file);
+  }
+
+  /** The symbols of a file. */
+  loadSymbolList(file: string): Promise<GdxSymbol[]> {
+    return loadSymbolList(this.source(), file);
+  }
+
+  /** The gdxdump output of a file or one of its symbols. */
+  dumpText(file: string, symbol?: string, signal?: AbortSignal): Promise<string> {
+    return loadDumpText(this.source(), file, symbol, signal);
+  }
+
+  /** A symbol as CSV with all fields and set texts (as gdxdump writes it). */
+  symbolCsv(file: string, symbol: string): Promise<string> {
+    return loadSymbolCsv(this.source(), file, symbol);
+  }
+
+  /** The domain of each symbol of a file, by its lower-case name. */
+  loadDomains(file: string): Promise<Map<string, string[]>> {
+    return loadDomains(this.source(), file);
   }
 
   /** Shows an error; offers to open the settings when the tools could not be found. */

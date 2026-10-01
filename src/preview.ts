@@ -136,7 +136,7 @@ export function filePreview(fileName: string, info: GdxFileInfo): string {
   });
   const parts = [`**${escapeMarkdown(fileName)}** · ${plural(info.symbols.length, 'symbol')}${byType.length ? `: ${byType.join(', ')}` : ''}`];
   const facts = [
-    version.get('unique elements') !== undefined ? `${count(Number(version.get('unique elements')))} unique elements` : '',
+    version.get('unique elements') !== undefined ? `${count(Number(version.get('unique elements')!.replace(/,/g, '')))} unique elements` : '',
     version.get('producer') ? `written by ${escapeMarkdown(version.get('producer')!)}` : '',
   ].filter(Boolean);
   if (facts.length) parts.push(facts.join(' · '));

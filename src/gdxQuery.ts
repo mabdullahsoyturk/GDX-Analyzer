@@ -8,12 +8,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { GdxFileInfo, loadFileInfo, loadSymbolColumns } from './gdxFile';
-import { GdxSymbol, parseDiffOutput, parseDomainInfo, parseUelTable } from './parse';
+import { GdxFileInfo, GdxSource, loadDomains, loadFileInfo, loadSymbolColumns, loadUels } from './gdxFile';
+import { GdxSymbol, parseDiffOutput } from './parse';
 import { scenarioNames, scenarioTable } from './scenario';
 import { MAX_REPORT_RECORDS, SolutionReport, SymbolSolution, amountText, recordName, solutionReport } from './solutionReport';
 import { BOUND_TOLERANCE, ColumnFilter, ColumnStats, SOLUTION_FILTERS, SolutionFilter, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
-import { DiffOptions, GdxTools } from './tools';
+import { DiffOptions } from './tools';
 
 export interface ToolSpec {
   name: string;
@@ -254,9 +254,14 @@ export class GdxQueries {
   private diffCount = 0;
 
   constructor(
-    private readonly tools: () => GdxTools,
+    private readonly source: GdxSource,
     private readonly cwd = process.cwd(),
   ) {}
+
+  /** gdxdiff (and gdxdump, if the files are read with it). */
+  private tools() {
+    return this.source.tools();
+  }
 
   /** Removes the difference files. */
   dispose() {
@@ -319,7 +324,7 @@ export class GdxQueries {
   }
 
   private info(file: string, stat: fs.Stats): Promise<GdxFileInfo> {
-    return this.cached(this.files, file, stat, () => loadFileInfo(this.tools(), file));
+    return this.cached(this.files, file, stat, () => loadFileInfo(this.source, file));
   }
 
   private async symbol(file: string, stat: fs.Stats, name: unknown): Promise<GdxSymbol> {
@@ -342,10 +347,10 @@ export class GdxQueries {
     return cachedView(this.views, key, () => {
       const view =
         symbol.name === UNIVERSE
-          ? this.cached(this.uels, file, stat, () => this.tools().dump(file, { uelTable: 'uels', noData: true }).then(parseUelTable)).then(
+          ? this.cached(this.uels, file, stat, () => loadUels(this.source, file)).then(
               (uels) => new TableView(universeTable(uels)),
             )
-          : loadSymbolColumns(this.tools(), file, symbol).then(
+          : loadSymbolColumns(this.source, file, symbol).then(
               // Agents get set elements without text as empty cells (not "Y" as in the viewer).
               (data) => new TableView({ ...columnTable(data.columns, data.keyCount, data.store, symbol), setTexts: false }),
             );
@@ -503,7 +508,7 @@ export class GdxQueries {
     const { file, stat } = this.file(args.file);
     const top = typeof args.top === 'number' ? Math.min(MAX_REPORT_RECORDS, Math.max(1, Math.floor(args.top))) : 20;
     const info = await this.info(file, stat);
-    const report = await this.cached(this.reports, file, stat, () => solutionReport(this.tools(), file, info.symbols));
+    const report = await this.cached(this.reports, file, stat, () => solutionReport(this.source, file, info.symbols));
     const count = (type: string) => report.symbols.filter((s) => s.type === type).length;
     const lines = [`Solution report of ${file}: ${plural(count('Var'), 'variable')}, ${plural(count('Equ'), 'equation')}`];
     if (!report.symbols.length) {
@@ -580,7 +585,7 @@ export class GdxQueries {
     const key = ['scenarios', base, ...files.map(({ file, stat }) => `${file}\0${stat.mtimeMs}\0${stat.size}`), symbol.name].join('\0');
     const view = await cachedView(this.views, key, () => {
       const v = (async () => {
-        const data = await Promise.all(files.map(async ({ file }, i) => ({ name: names[i], data: symbols[i] ? await loadSymbolColumns(this.tools(), file, symbols[i]!) : undefined })));
+        const data = await Promise.all(files.map(async ({ file }, i) => ({ name: names[i], data: symbols[i] ? await loadSymbolColumns(this.source, file, symbols[i]!) : undefined })));
         let table;
         try {
           table = scenarioTable(data, base, symbol);
@@ -589,7 +594,7 @@ export class GdxQueries {
         }
         // Agents get set elements without text as empty cells (not "Y" as in the viewer).
         const view = new TableView({ ...table, setTexts: false });
-        const uels = await Promise.all(files.map(({ file, stat }) => this.cached(this.uels, file, stat, () => this.tools().dump(file, { uelTable: 'uels', noData: true }).then(parseUelTable))));
+        const uels = await Promise.all(files.map(({ file, stat }) => this.cached(this.uels, file, stat, () => loadUels(this.source, file))));
         view.setUelOrder([...new Set([base, ...files.map((_, i) => i).filter((i) => i !== base)].flatMap((i) => uels[i]))]);
         return view;
       })();
@@ -693,18 +698,18 @@ export class GdxQueries {
       return known ? `${header}: ${known.name} does not differ.` : `${header}: neither file has a symbol "${name}".`;
     }
     const diffStat = fs.statSync(diff.diffFile);
-    const diffSymbol = find(await this.cached(this.files, diff.diffFile, diffStat, () => loadFileInfo(tools, diff.diffFile)).then((i) => i.symbols), name);
+    const diffSymbol = find(await this.cached(this.files, diff.diffFile, diffStat, () => loadFileInfo(this.source, diff.diffFile)).then((i) => i.symbols), name);
     if (!diffSymbol) {
       return `${header}: ${entry.symbol}: ${entry.status} (gdxdiff reports no records for it).`;
     }
     const original = find(info1.symbols, name) ?? find(info2.symbols, name);
     const dim = original?.dim ?? diffSymbol.dim - 1;
-    const domains = new Map([...parseDomainInfo(await tools.dump(a.file, { domainInfo: true }))].map(([k, v]) => [k, v.domain]));
+    const domains = await loadDomains(this.source, a.file);
     const known = domains.get(name.toLowerCase());
     const domain = known && known.length === dim ? known : Array<string>(dim).fill('*');
     const viewKey = `${diff.diffFile}\0${diffStat.mtimeMs}\0${diffSymbol.name}`;
     const view = await cachedView(this.views, viewKey, () => {
-      const v = loadSymbolColumns(tools, diff.diffFile, { ...diffSymbol, domain: [...domain, ...(diffSymbol.dim - domain.length === 2 ? ['Field'] : []), '*'] }).then(
+      const v = loadSymbolColumns(this.source, diff.diffFile, { ...diffSymbol, domain: [...domain, ...(diffSymbol.dim - domain.length === 2 ? ['Field'] : []), '*'] }).then(
         (data) => new TableView(diffColumnTable(data)),
       );
       v.catch(() => this.views.get(viewKey) === v && this.views.delete(viewKey));

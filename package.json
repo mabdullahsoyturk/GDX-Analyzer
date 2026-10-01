@@ -282,6 +282,19 @@
           "default": "auto",
           "description": "Which tools to use for reading and comparing GDX files."
         },
+        "gdxAnalyzer.reader": {
+          "type": "string",
+          "enum": [
+            "native",
+            "gdxdump"
+          ],
+          "enumDescriptions": [
+            "Read GDX files, and write their text dumps and CSV, with the extension's own reader: faster, and without gdxdump (files it does not support are read with gdxdump).",
+            "Read GDX files, and write their text dumps and CSV, with gdxdump (of the tools chosen with gdxAnalyzer.backend)."
+          ],
+          "default": "native",
+          "markdownDescription": "How the viewer, comparisons, hovers, *Dump to Text*, *Export Symbol to CSV* and the MCP server read GDX files. Comparisons always use gdxdiff (see `#gdxAnalyzer.backend#`)."
+        },
         "gdxAnalyzer.gamsSystemDirectory": {
           "type": "string",
           "default": "",

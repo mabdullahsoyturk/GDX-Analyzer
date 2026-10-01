@@ -2077,7 +2077,8 @@ export const UNIVERSE = '*';
 
 /** The universe as the first entry of the symbol list: a one-dimensional set of all labels. */
 export function universeSymbol(version: [string, string][]): GdxSymbol & { universe: true } {
-  const count = Number(version.find(([k]) => /^unique elements$/i.test(k))?.[1]);
+  // gdxdump writes thousands separators (70,320).
+  const count = Number(version.find(([k]) => /^unique elements$/i.test(k))?.[1]?.replace(/,/g, ''));
   return {
     name: UNIVERSE,
     dim: 1,

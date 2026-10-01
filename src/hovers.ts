@@ -11,7 +11,6 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { GdxFileInfo } from './gdxFile';
 import { SELECTOR, SHOW_COMMAND, candidatePaths, existing, referencesOf } from './links';
-import { parseUelTable } from './parse';
 import { MAX_PREVIEW_RECORDS, filePreview, symbolPreview } from './preview';
 import { GdxService, errorMessage } from './service';
 import { TableView, UNIVERSE, cachedView, columnTable, universeSymbol, universeTable } from './table';
@@ -134,7 +133,7 @@ export class GdxHoverProvider implements vscode.HoverProvider {
       view = await cachedView(this.views, [file, stat.mtimeMs, stat.size, symbol.name].join('\0'), () => {
         const loaded =
           symbol.name === UNIVERSE
-            ? this.service.tools().dump(file, { uelTable: 'uels', noData: true }).then((text) => new TableView(universeTable(parseUelTable(text))))
+            ? this.service.loadUels(file).then((uels) => new TableView(universeTable(uels)))
             : // Set elements without text are shown empty (not "Y" as in the viewer).
               this.service.loadSymbolColumns(file, symbol).then((d) => new TableView({ ...columnTable(d.columns, d.keyCount, d.store, symbol), setTexts: false }));
         loaded.catch(() => this.views.forEach((v, k) => v === loaded && this.views.delete(k)));

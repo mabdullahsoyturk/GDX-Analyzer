@@ -24,7 +24,7 @@ function tryResolve(): ResolvedTools | undefined {
 const resolved = tryResolve();
 
 describe('GDX queries for agents', { skip: resolved ? false : 'GAMS tools not found' }, () => {
-  const queries = new GdxQueries(() => new GdxTools(resolved!), fixtures);
+  const queries = new GdxQueries({ encoding: 'utf-8', tools: () => new GdxTools(resolved!) }, fixtures);
   after(() => queries.dispose());
 
   it('lists symbols with types and domains, relative to the working directory', async () => {

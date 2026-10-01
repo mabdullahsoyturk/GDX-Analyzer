@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { DiffPanel, cleanupDiffStorage } from './diff';
 import { DUMP_SCHEME, GdxDumpProvider, dumpUri } from './dump';
-import { GdxSymbol, parseSymbols } from './parse';
+import { GdxSymbol } from './parse';
 import { GdxService, describeTools } from './service';
 import { textDecoder } from './tools';
 import { ViewStateStore } from './viewState';
@@ -164,7 +164,7 @@ export function activate(context: vscode.ExtensionContext) {
   async function hasSymbol(file: string, symbol: string): Promise<boolean> {
     const wanted = symbol.toLowerCase();
     const session = viewer.sessionFor(vscode.Uri.file(file));
-    const symbols = session?.symbols.length ? session.symbols : parseSymbols(await service.tools().dump(file, { symbols: true }));
+    const symbols = session?.symbols.length ? session.symbols : await service.loadSymbolList(file);
     return symbols.some((s) => s.name.toLowerCase() === wanted);
   }
 
@@ -215,7 +215,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand(
       'gdxAnalyzer.dump',
-      guarded('gdxdump failed', async (arg?: unknown) => {
+      guarded('Dumping failed', async (arg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Dump GDX File');
         if (uri) {
           await openDump(uri);
@@ -225,7 +225,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand(
       'gdxAnalyzer.dumpSymbol',
-      guarded('gdxdump failed', async (arg?: unknown, symbolArg?: unknown) => {
+      guarded('Dumping failed', async (arg?: unknown, symbolArg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Dump GDX Symbol');
         const symbol = uri && (await pickSymbol(uri, symbolArg));
         if (uri && symbol) {
@@ -249,7 +249,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!target) {
           return;
         }
-        const csv = await service.tools().dump(uri.fsPath, { symbol, format: 'csv', csvAllFields: true, csvSetText: true });
+        const csv = await service.symbolCsv(uri.fsPath, symbol);
         await vscode.workspace.fs.writeFile(target, Buffer.from(csv, 'utf8'));
         const choice = await vscode.window.showInformationMessage(`Exported ${symbol} to ${path.basename(target.fsPath)}.`, 'Open');
         if (choice) {
@@ -409,10 +409,18 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       'gdxAnalyzer.showToolInfo',
       guarded('Locating the GDX tools failed', async () => {
-        const tools = service.tools().tools;
-        const lines = [`Backend: ${describeTools(tools)}`, `gdxdump: ${tools.gdxdump}`, `gdxdiff: ${tools.gdxdiff}`];
+        const native = service.source().useGdxdump ? 'GDX files: read with gdxdump' : 'GDX files: read natively';
+        let lines: string[];
+        try {
+          const tools = service.tools().tools;
+          lines = [native, `Backend: ${describeTools(tools)}`, `gdxdump: ${tools.gdxdump}`, `gdxdiff: ${tools.gdxdiff}`];
+        } catch (err) {
+          // Reading natively needs no tools: say what else needs them.
+          if (service.source().useGdxdump) throw err;
+          lines = [native, `gdxdump/gdxdiff (for comparisons and text dumps): ${err instanceof Error ? err.message : String(err)}`];
+        }
         lines.forEach((l) => service.log(l));
-        const choice = await vscode.window.showInformationMessage(lines[0], 'Show Log', 'Open Settings');
+        const choice = await vscode.window.showInformationMessage(lines.slice(0, 2).join('. '), 'Show Log', 'Open Settings');
         if (choice === 'Show Log') {
           service.output.show();
         } else if (choice === 'Open Settings') {

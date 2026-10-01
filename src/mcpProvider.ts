@@ -7,13 +7,16 @@ import * as vscode from 'vscode';
 import { GdxService } from './service';
 import { findOnPath } from './tools';
 
-/** Environment of the server: the tools the extension uses, and the encoding. */
+/** Environment of the server: the tools the extension uses, the encoding and how GDX files are read. */
 function serverEnv(service: GdxService): Record<string, string> {
   const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
   const env: Record<string, string> = {};
   const encoding = cfg.get<string>('encoding', 'utf-8').trim();
   if (encoding && encoding.toLowerCase() !== 'utf-8') {
     env.GDX_ENCODING = encoding;
+  }
+  if (cfg.get<string>('reader', 'native') === 'gdxdump') {
+    env.GDX_READER = 'gdxdump';
   }
   try {
     // The resolved tools, so that the server finds them like the extension does (e.g. in a workspace .venv).
