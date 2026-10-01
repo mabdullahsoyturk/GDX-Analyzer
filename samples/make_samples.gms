@@ -1,15 +1,17 @@
-* Generates base.gdx and scenario.gdx, two files to try the compare view of the GDX Viewer.
+* Generates base.gdx and scenario.gdx, two files to try the compare view of the GDX Viewer, and
+* infeasible.gdx, an infeasible solution of the model to try the solution report.
 *   gams make_samples.gms --scenario=0 gdx=base.gdx
 *   gams make_samples.gms --scenario=1 gdx=scenario.gdx
+*   gams make_samples.gms --scenario=2 gdx=infeasible.gdx
 $if not set scenario $set scenario 0
 
 Set p 'products' / bikes 'City bikes', ebikes 'Electric bikes', scooters 'Kick scooters', helmets 'Helmets', locks 'Locks' /
     t 'months'   / jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec /
-$ifThen %scenario% == 0
-    r 'regions'  / north 'Northern region', east 'Eastern region', west 'Western region', central 'Central region' /;
-$else
+$ifThen %scenario% == 1
 *   New region, and a changed element text.
     r 'regions'  / north 'Northern region', east 'Eastern region (incl. harbour)', west 'Western region', central 'Central region', south 'Southern region' /;
+$else
+    r 'regions'  / north 'Northern region', east 'Eastern region', west 'Western region', central 'Central region' /;
 $endIf
 Set i 'customers' / c1*c200 /
     j 'SKUs'      / s1*s40 /;
@@ -62,18 +64,18 @@ stats('new') = 42;
 $endIf
 
 * A symbol that exists only in one of the files.
-$ifThen %scenario% == 0
-Scalar legacyFactor 'only in base.gdx' / 1.1 /;
-$else
+$ifThen %scenario% == 1
 Scalar carbonTax 'only in scenario.gdx, EUR per unit' / 12 /;
+$else
+Scalar legacyFactor 'only in base.gdx' / 1.1 /;
 $endIf
 
 * A symbol whose dimension differs between the files: gdxdiff cannot compare it.
-$ifThen %scenario% == 0
-Parameter shipCost(r) 'shipping cost per unit' / north 12, east 9, west 14, central 7 /;
-$else
+$ifThen %scenario% == 1
 Parameter shipCost(r,p) 'shipping cost per unit and product';
 shipCost(r,p) = 10 + ord(r) + ord(p);
+$else
+Parameter shipCost(r) 'shipping cost per unit' / north 12, east 9, west 14, central 7 /;
 $endIf
 
 * A small production planning model, so the files contain variables and equations.
@@ -84,6 +86,12 @@ defProfit.. profit =e= sum((r,p,t), price(p)*sell(r,p,t) - unitCost(p)*make(r,p,
 cap(r,t)..  sum(p, hours(p)*make(r,p,t)) =l= capacity(r);
 bal(r,p,t).. sell(r,p,t) =l= make(r,p,t);
 sell.up(r,p,t) = demand(r,p,t);
+$ifThen %scenario% == 2
+* All demand must be delivered, which needs more than the capacity in a few months: infeasible.
+* CONOPT returns the point where it stopped, with the capacity limits it could not meet.
+sell.lo(r,p,t) = demand(r,p,t);
+option lp = conopt;
+$endIf
 Model plan / all /;
 solve plan using lp maximizing profit;
 

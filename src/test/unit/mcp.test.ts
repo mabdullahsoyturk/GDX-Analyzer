@@ -118,6 +118,22 @@ describe('GDX queries for agents', { skip: resolved ? false : 'GAMS tools not fo
     await assert.rejects(queries.call('gdx_compare_scenarios', { files, symbol: 'nope' }), /None of the files has a symbol "nope"/);
   });
 
+  it('reports the solution status of all variables and equations', async () => {
+    const text = await queries.call('gdx_solution_report', { file: 'solution.gdx', top: 3 });
+    assert.match(text, /: 3 variables, 2 equations$/m);
+    assert.match(text, /^4 records outside their bounds in 3 symbols; the largest infeasibility is 3 \(x\(i4\)\)$/m);
+    assert.match(text, /^3 binding constraints .* in 2 equations$/m);
+    // In the order of the file, not by name.
+    assert.match(text, /max \|marginal\|,at lower,at upper\nx,Positive Variable,4,2,3,1,2,1,0\nz,Free Variable,1,0,,0,,0,0\ny,Binary Variable,2,0,,1,0\.5,1,1\ncap,Equation,4,1,1\.5,2,3,0,2\nbal,Equation,1,1,0\.25,1,100,0,0\n/);
+    assert.match(text, /farthest outside first \(3 of 4\):\nrecord,type,Level,Lower,Upper,Infeasibility\nx\(i4\),Variable,23,0,20,3\ncap\(i3\),Equation,11\.5,-Inf,10,1\.5\nx\(i3\),Variable,-0\.5,0,20,0\.5\n/);
+    // Only equations are binding constraints (x and y have reduced costs).
+    assert.match(text, /largest \|marginal\| first \(3 of 3\):\nrecord,Level,Marginal,Lower,Upper\nbal,24\.75,100,25,25\ncap\(i1\),10,-3,-Inf,10\ncap\(i4\),10,Eps,-Inf,10$/);
+    const feasible = await queries.call('gdx_solution_report', { file: 'transport1.gdx' });
+    assert.match(feasible, /^No record is outside its bounds\.$/m);
+    assert.doesNotMatch(feasible, /Records outside their bounds/);
+    assert.match(await queries.call('gdx_solution_report', { file: 'edge.gdx' }), /0 variables, 0 equations\. The file holds no solution/);
+  });
+
   it('reports wrong arguments as query errors', async () => {
     await assert.rejects(queries.call('gdx_read_symbol', { file: 'missing.gdx', symbol: 'x' }), (e: Error) => e instanceof QueryError && /File not found/.test(e.message));
     await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'nope' }), /has no symbol "nope"/);

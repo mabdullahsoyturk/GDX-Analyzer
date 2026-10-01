@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
  * they change incompatibly: after an update that was installed without reloading the
  * window, the old extension code still runs while webviews load the new scripts.
  */
-export const PROTOCOL = 7;
+export const PROTOCOL = 8;
 
 function nonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

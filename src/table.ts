@@ -99,6 +99,29 @@ export const SOLUTION_FILTERS: readonly SolutionFilter[] = ['marginal', 'atLower
 /** Tolerance of the bound tests of the solution filters, relative to the bound (absolute below 1). */
 export const BOUND_TOLERANCE = 1e-6;
 
+/** A variable or equation record in a solution summary, with its fields as written by gdxdump. */
+export interface SolutionRecord {
+  keys: string[];
+  level: string;
+  marginal: string;
+  lower: string;
+  upper: string;
+  /** Records outside their bounds: how far the level is from the bound it violates. Binding records: |marginal| (EPS: 0). */
+  amount: number;
+}
+
+/** The solution status of a variable or equation (see TableView.solutionSummary). */
+export interface SolutionSummary {
+  /** The number of records of each solution filter (as solutionFilters()). */
+  counts: { filter: SolutionFilter; count: number }[];
+  /** The records outside their bounds, farthest outside first. */
+  infeasible: SolutionRecord[];
+  /** The records with a non-zero or EPS marginal, largest |marginal| first. */
+  marginals: SolutionRecord[];
+  /** The column of the Marginal field. */
+  marginalColumn: number;
+}
+
 export interface RowSelection {
   /** Only rows with a cell matching this search (see search.ts); matched against the displayed values. */
   filter?: string | TextSearch;
@@ -448,6 +471,51 @@ const ABS_CATEGORY: Record<number, number> = { [Sp.None]: 0, [Sp.Eps]: 0, [Sp.PI
 /** Sort categories: -Inf, numbers (with Eps as 0), +Inf, NA, Undf, empty, text. */
 const SORT_CATEGORY: Record<number, number> = { [Sp.MInf]: 0, [Sp.None]: 1, [Sp.Eps]: 1, [Sp.PInf]: 2, [Sp.NA]: 3, [Sp.Undf]: 4, [Sp.Empty]: 5, [Sp.Text]: 6 };
 
+/**
+ * The `k` rows with the largest amounts, of rows added in increasing order (a min-heap of
+ * the rows kept; of equal amounts, the first rows are kept).
+ */
+export class TopRows {
+  private readonly heap: { row: number; amount: number }[] = [];
+
+  constructor(private readonly k: number) {}
+
+  /** a is kept before b: a larger amount, or the same amount and an earlier row. */
+  private static before(a: { row: number; amount: number }, b: { row: number; amount: number }): boolean {
+    return a.amount > b.amount || (a.amount === b.amount && a.row < b.row);
+  }
+
+  add(row: number, amount: number) {
+    const heap = this.heap;
+    if (heap.length < this.k) {
+      heap.push({ row, amount });
+      for (let i = heap.length - 1; i > 0; ) {
+        const parent = (i - 1) >> 1;
+        if (!TopRows.before(heap[parent], heap[i])) break;
+        [heap[parent], heap[i]] = [heap[i], heap[parent]];
+        i = parent;
+      }
+    } else if (this.k > 0 && amount > heap[0].amount) {
+      heap[0] = { row, amount };
+      for (let i = 0; ; ) {
+        const a = 2 * i + 1;
+        const b = a + 1;
+        let last = i;
+        if (a < heap.length && TopRows.before(heap[last], heap[a])) last = a;
+        if (b < heap.length && TopRows.before(heap[last], heap[b])) last = b;
+        if (last === i) break;
+        [heap[last], heap[i]] = [heap[i], heap[last]];
+        i = last;
+      }
+    }
+  }
+
+  /** The rows kept, largest amount first. */
+  sorted(): { row: number; amount: number }[] {
+    return [...this.heap].sort((a, b) => (TopRows.before(a, b) ? -1 : TopRows.before(b, a) ? 1 : 0));
+  }
+}
+
 export class TableView {
   private lastKey?: string;
   private lastIndex: Int32Array = new Int32Array(0);
@@ -777,6 +845,47 @@ export class TableView {
       });
     }
     return this.solutionCache;
+  }
+
+  /**
+   * The solution status of a variable or equation: the counts of the solution filters, and at
+   * most `top` records outside their bounds (farthest first) and with a non-zero or EPS marginal
+   * (largest |marginal| first). Undefined for symbols without the fields of variables and equations.
+   */
+  solutionSummary(top: number): SolutionSummary | undefined {
+    const [level, marginal, lower, upper] = ['Level', 'Marginal', 'Lower', 'Upper'].map((f) => this.fieldColumn(f));
+    const outside = this.solutionTest('infeasible');
+    const binding = this.solutionTest('marginal');
+    if (!outside || !binding || marginal < 0) {
+      return undefined;
+    }
+    const l = this.fieldValues(level);
+    const lo = this.fieldValues(lower);
+    const up = this.fieldValues(upper);
+    const m = this.fieldValues(marginal);
+    const worst = new TopRows(top);
+    const largest = new TopRows(top);
+    for (let r = 0; r < this.cells.length; r++) {
+      if (outside(r)) {
+        const x = l(r);
+        // Only one side is violated (the other difference is negative or NaN).
+        worst.add(r, x < lo(r) ? lo(r) - x : x - up(r));
+      }
+      if (binding(r)) {
+        const x = Math.abs(m(r));
+        largest.add(r, Number.isNaN(x) ? 0 : x);
+      }
+    }
+    const keys = this.keyColumns;
+    const record = ({ row, amount }: { row: number; amount: number }): SolutionRecord => ({
+      keys: keys.map((c) => this.cells.get(row, c)),
+      level: this.cells.get(row, level),
+      marginal: this.cells.get(row, marginal),
+      lower: this.cells.get(row, lower),
+      upper: this.cells.get(row, upper),
+      amount,
+    });
+    return { counts: this.solutionFilters(), infeasible: worst.sorted().map(record), marginals: largest.sorted().map(record), marginalColumn: marginal };
   }
 
   /** Columns that are shown: all key/status columns plus the value/text columns that are not hidden. */

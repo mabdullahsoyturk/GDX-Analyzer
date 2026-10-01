@@ -335,6 +335,29 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand(
+      'gdxAnalyzer.solutionReport',
+      guarded('Showing the solution report failed', async (arg?: unknown) => {
+        const uri = await gdxOrPick(arg, 'Solution Report of GDX File');
+        if (!uri) {
+          return;
+        }
+        let session = viewer.sessionFor(uri);
+        if (!session) {
+          await vscode.commands.executeCommand('vscode.openWith', uri, GdxViewerProvider.viewType);
+          session = viewer.sessionFor(uri);
+        }
+        if (!session || !(await session.whenLoaded())) {
+          return;
+        }
+        if (!session.symbols.some((s) => s.type === 'Var' || s.type === 'Equ')) {
+          vscode.window.showInformationMessage(`${path.basename(uri.fsPath)} has no variables or equations.`);
+          return;
+        }
+        session.showReport();
+      }),
+    ),
+
+    vscode.commands.registerCommand(
       'gdxAnalyzer.resetViewState',
       guarded('Resetting the viewer state failed', async (arg?: unknown) => {
         const uri = await gdxOrPick(arg, 'Reset the Viewer State of');

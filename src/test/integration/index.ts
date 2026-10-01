@@ -139,6 +139,19 @@ const tests: [string, () => Promise<void>][] = [
     },
   ],
   [
+    'opens the solution report of a file in the viewer',
+    async () => {
+      const solution = vscode.Uri.file(path.join(fixtures, 'solution.gdx'));
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand('gdxAnalyzer.solutionReport', solution);
+      const tab = await waitFor('viewer tab', () => {
+        const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+        return input instanceof vscode.TabInputCustom && input.viewType === 'gdxAnalyzer.viewer' ? input : undefined;
+      });
+      assert.equal(tab.uri.fsPath, solution.fsPath);
+    },
+  ],
+  [
     'registers the MCP server for AI agents',
     async () => {
       const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-analyzer');

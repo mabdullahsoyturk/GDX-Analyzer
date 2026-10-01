@@ -124,7 +124,8 @@ export class McpServer {
           serverInfo: { name: 'gdx', title: 'GDX Analyzer', version: VERSION },
           instructions:
             'Read-only access to GAMS GDX files (model data and solutions). Call gdx_list_symbols first, then gdx_read_symbol or gdx_symbol_stats ' +
-            'for the records of a symbol; gdx_compare compares two files with gdxdiff. Results are CSV with exact values and are paged.',
+            'for the records of a symbol; gdx_solution_report summarizes the solution status of all variables and equations (infeasibilities, binding constraints); ' +
+            'gdx_compare compares two files with gdxdiff. Results are CSV with exact values and are paged.',
         };
       }
       case 'ping':

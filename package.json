@@ -2,7 +2,7 @@
   "name": "gdx-analyzer",
   "displayName": "GDX Analyzer",
   "description": "Browse, chart and compare GAMS GDX files: a fast viewer with table view, charts, gdxdiff comparisons, Excel export and MCP tools for AI agents. Independent; not affiliated with GAMS.",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "publisher": "muhammet-soyturk",
   "author": {
     "name": "Muhammet Soyturk"
@@ -117,6 +117,11 @@
         "category": "GDX"
       },
       {
+        "command": "gdxAnalyzer.solutionReport",
+        "title": "Show Solution Report",
+        "category": "GDX"
+      },
+      {
         "command": "gdxAnalyzer.resetViewState",
         "title": "Reset Viewer State",
         "category": "GDX"
@@ -165,9 +170,14 @@
           "group": "gdx@2"
         },
         {
-          "command": "gdxAnalyzer.resetViewState",
+          "command": "gdxAnalyzer.solutionReport",
           "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
           "group": "gdx@3"
+        },
+        {
+          "command": "gdxAnalyzer.resetViewState",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
+          "group": "gdx@4"
         },
         {
           "command": "gdxAnalyzer.selectForCompare",
@@ -222,6 +232,11 @@
           "command": "gdxAnalyzer.compareWithRevision",
           "when": "activeCustomEditorId == gdxAnalyzer.viewer && gitOpenRepositoryCount != 0",
           "group": "1_gdx@2"
+        },
+        {
+          "command": "gdxAnalyzer.solutionReport",
+          "when": "activeCustomEditorId == gdxAnalyzer.viewer",
+          "group": "1_gdx@3"
         }
       ],
       "commandPalette": [

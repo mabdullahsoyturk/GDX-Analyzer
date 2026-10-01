@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.2
+
+### Added
+
+- **Solution report:** the solution status of all variables and equations of a file at once: the records outside
+  their bounds (farthest outside first), the binding constraints (largest |marginal| first), and per symbol the
+  records outside their bounds, with a non-zero marginal and at their bounds. Click a record or a count to open the
+  symbol with that solution status filter. **GDX: Show Solution Report**, or **Solution Report** in the viewer.
+- **MCP tool `gdx_solution_report`:** the same report for AI agents, e.g. to find out why a model is infeasible.
+
 ## 0.9.1
 
 ### Added

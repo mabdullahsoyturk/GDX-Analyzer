@@ -11,6 +11,7 @@ import * as path from 'path';
 import { GdxFileInfo, loadFileInfo, loadSymbolColumns } from './gdxFile';
 import { GdxSymbol, parseDiffOutput, parseDomainInfo, parseUelTable } from './parse';
 import { scenarioNames, scenarioTable } from './scenario';
+import { MAX_REPORT_RECORDS, SolutionReport, SymbolSolution, amountText, recordName, solutionReport } from './solutionReport';
 import { BOUND_TOLERANCE, ColumnFilter, ColumnStats, SOLUTION_FILTERS, SolutionFilter, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
 import { DiffOptions, GdxTools } from './tools';
 
@@ -124,6 +125,24 @@ export const TOOL_SPECS: ToolSpec[] = [
     },
   },
   {
+    name: 'gdx_solution_report',
+    title: 'GDX solution report',
+    description:
+      'Reports the solution status of all variables and equations of a GDX file at once, e.g. to find out why a model is infeasible or which constraints drive the solution. ' +
+      'Per symbol: the number of records outside their bounds and the largest infeasibility (how far a level is outside its bounds), the records with a non-zero or Eps marginal ' +
+      'and the largest |marginal|, and the records at their lower and upper bounds. Then the records outside their bounds, farthest outside first, and the binding constraints ' +
+      '(equation records with a non-zero or Eps marginal), largest |marginal| first. Use gdx_read_symbol with "solution" for all records of a symbol with a status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: FILE,
+        top: { type: 'integer', minimum: 1, maximum: MAX_REPORT_RECORDS, description: `Records of each list (default 20, at most ${MAX_REPORT_RECORDS}).` },
+      },
+      required: ['file'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'gdx_compare_scenarios',
     title: 'Compare GDX scenarios',
     description:
@@ -190,7 +209,7 @@ const SUBTYPE_NAMES: Record<string, string> = { sos1: 'SOS1', sos2: 'SOS2', semi
 const FIELD_ALIASES: Record<string, string> = { l: 'level', m: 'marginal', lo: 'lower', up: 'upper', val: 'value' };
 
 /** Type of a symbol as GAMS writes it, e.g. "Positive Variable". */
-export function typeLabel(s: GdxSymbol): string {
+export function typeLabel(s: Pick<GdxSymbol, 'type' | 'subtype'>): string {
   const base = TYPE_NAMES[s.type] ?? s.type;
   if (!s.subtype) return base;
   return `${SUBTYPE_NAMES[s.subtype] ?? s.subtype.charAt(0).toUpperCase() + s.subtype.slice(1)} ${base}`;
@@ -229,6 +248,7 @@ export class GdxQueries {
   private readonly files = new Map<string, Cached<GdxFileInfo>>();
   private readonly uels = new Map<string, Cached<string[]>>();
   private readonly views = new Map<string, Promise<TableView>>();
+  private readonly reports = new Map<string, Cached<SolutionReport>>();
   private readonly diffs = new Map<string, Promise<{ diffFile: string; stdout: string; exitCode: number }>>();
   private workDir?: string;
   private diffCount = 0;
@@ -259,6 +279,8 @@ export class GdxQueries {
         return this.compare(args);
       case 'gdx_compare_scenarios':
         return this.compareScenarios(args);
+      case 'gdx_solution_report':
+        return this.solutionReport(args);
     }
     throw new QueryError(`Unknown tool ${name}.`);
   }
@@ -473,6 +495,52 @@ export class GdxQueries {
     }
     if (result.offset + result.rows.length < result.filteredCount) {
       lines.push(`(more: page=${result.page + 1})`);
+    }
+    return lines.join('\n');
+  }
+
+  private async solutionReport(args: Record<string, unknown>): Promise<string> {
+    const { file, stat } = this.file(args.file);
+    const top = typeof args.top === 'number' ? Math.min(MAX_REPORT_RECORDS, Math.max(1, Math.floor(args.top))) : 20;
+    const info = await this.info(file, stat);
+    const report = await this.cached(this.reports, file, stat, () => solutionReport(this.tools(), file, info.symbols));
+    const count = (type: string) => report.symbols.filter((s) => s.type === type).length;
+    const lines = [`Solution report of ${file}: ${plural(count('Var'), 'variable')}, ${plural(count('Equ'), 'equation')}`];
+    if (!report.symbols.length) {
+      return `${lines[0]}. The file holds no solution (gdx_list_symbols lists its symbols).`;
+    }
+    const symbolsWith = (filter: keyof SymbolSolution['counts'], type?: string) => report.symbols.filter((s) => (s.counts[filter] ?? 0) > 0 && (!type || s.type === type)).length;
+    const first = report.infeasible[0];
+    lines.push(
+      report.infeasibleCount
+        ? `${plural(report.infeasibleCount, 'record')} outside their bounds in ${plural(symbolsWith('infeasible'), 'symbol')}; the largest infeasibility is ${amountText(first.amount)} (${recordName(first.symbol, first.keys)})`
+        : 'No record is outside its bounds.',
+      `${plural(report.bindingCount, 'binding constraint')} (equation records with a non-zero or Eps marginal) in ${plural(symbolsWith('marginal', 'Equ'), 'equation')}`,
+      `Bounds are compared with the tolerance ${BOUND_TOLERANCE} · max(1, |bound|); Eps counts as 0.`,
+      '',
+      'Per symbol:',
+      csvLine(['symbol', 'type', 'records', 'outside bounds', 'max infeasibility', 'non-zero marginal', 'max |marginal|', 'at lower', 'at upper']),
+    );
+    const num = (x: number | undefined) => (x === undefined ? '' : amountText(x));
+    for (const s of report.symbols) {
+      const c = s.counts;
+      lines.push(csvLine([s.name, typeLabel(s), String(s.records), String(c.infeasible ?? ''), num(s.maxInfeasibility), String(c.marginal ?? ''), num(s.maxMarginal), String(c.atLower ?? ''), String(c.atUpper ?? '')]));
+    }
+    const shown = (list: unknown[], total: number) => `${Math.min(top, list.length).toLocaleString('en-US')} of ${total.toLocaleString('en-US')}`;
+    if (report.infeasibleCount) {
+      lines.push('', `Records outside their bounds, farthest outside first (${shown(report.infeasible, report.infeasibleCount)}):`, csvLine(['record', 'type', 'Level', 'Lower', 'Upper', 'Infeasibility']));
+      for (const r of report.infeasible.slice(0, top)) {
+        lines.push(csvLine([recordName(r.symbol, r.keys), TYPE_NAMES[r.type], r.level, r.lower, r.upper, amountText(r.amount)]));
+      }
+    }
+    if (report.bindingCount) {
+      lines.push('', `Binding constraints, largest |marginal| first (${shown(report.binding, report.bindingCount)}):`, csvLine(['record', 'Level', 'Marginal', 'Lower', 'Upper']));
+      for (const r of report.binding.slice(0, top)) {
+        lines.push(csvLine([recordName(r.symbol, r.keys), r.level, r.marginal, r.lower, r.upper]));
+      }
+    }
+    for (const s of report.symbols.filter((x) => x.error)) {
+      lines.push(`Note: the records of ${s.name} could not be read: ${s.error}`);
     }
     return lines.join('\n');
   }

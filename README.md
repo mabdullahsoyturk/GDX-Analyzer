@@ -38,6 +38,21 @@ no GAMS installation is needed. See the [changelog](CHANGELOG.md) for what is ne
 - **Remembers your view** of every symbol (filters, sorting, layout, format, column widths) and reloads when the
   file changes, e.g. after a GAMS run.
 
+### Solution report
+
+![The solution report of an infeasible solution: the capacity limits it violates and the binding constraints](images/report.png)
+
+**Solution Report** (in the viewer, the Explorer and the Command Palette) checks all variables and equations of a
+solution at once, e.g. to find out why a model is infeasible or which constraints drive the solution:
+
+- the **records outside their bounds**, farthest outside first, with their level, bounds and infeasibility,
+- the **binding constraints** (equations with a non-zero or EPS marginal), largest |marginal| first,
+- per symbol, the number of records outside their bounds, with a non-zero marginal and at their lower and upper
+  bounds, with the largest infeasibility and |marginal|.
+
+Click a record or a count to open the symbol with that solution status filter. The report is read again when the
+file changes, e.g. after a GAMS run.
+
 ### Charts
 
 ![A heatmap of a parameter with positive and negative values](images/chart.png)
@@ -101,6 +116,7 @@ available to agent mode in VS Code automatically. For Claude Code, Cursor and ot
 | `gdx_symbol_stats` | Distinct labels per dimension; count, sum, mean, min, max and special values per field, optionally filtered |
 | `gdx_compare` | The differing symbols of two files, or the differing records of one symbol with Δ and Δ%, sortable by magnitude |
 | `gdx_compare_scenarios` | One symbol across several files, with Δ and Δ% from a base scenario; filters, sorting by magnitude and paging |
+| `gdx_solution_report` | The solution status of all variables and equations: records outside their bounds, binding constraints, levels at bounds |
 
 ## Getting started
 
@@ -122,6 +138,7 @@ menu and the viewer.
 | Compare Scenarios… | Compare a symbol across several GDX files |
 | Compare with Git Revision… (gdxdiff) | Compare a GDX file with a version of it in Git, or two versions with each other |
 | Show Symbol in GDX File | Open the symbol under the cursor in a GDX file the GAMS or Python document references |
+| Show Solution Report | Records outside their bounds, binding constraints and levels at bounds of all variables and equations |
 | Export to Excel… | Export symbols to an Excel workbook |
 | Export Symbol to CSV | Save the records of a symbol as CSV |
 | Dump to Text / Dump Symbol to Text | Open the gdxdump output of a file or symbol |

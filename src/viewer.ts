@@ -11,6 +11,7 @@ import { ViewStateStore } from './viewState';
 import { writeXlsx } from './xlsx';
 import { PROTOCOL, webviewHtml } from './webview';
 import { CodeLanguage, symbolCode } from './codegen';
+import { SolutionReport, showReport, solutionReport } from './solutionReport';
 
 class GdxDocument implements vscode.CustomDocument {
   constructor(readonly uri: vscode.Uri) {}
@@ -24,6 +25,7 @@ type FromWebview =
   | { type: 'query'; name: string; query: WebviewQuery }
   | { type: 'columnValues'; name: string; column: number }
   | { type: 'code'; name: string; language: CodeLanguage; target: 'clipboard' | 'editor'; state?: SymbolViewState }
+  | { type: 'report'; refresh?: boolean }
   | CopyRequest
   | SelectionRequest
   | ImageMessage
@@ -47,6 +49,11 @@ class ViewerSession implements vscode.Disposable {
   /** The webview has been sent the file (it is discarded while the tab is hidden and loads the file again). */
   private webviewHasFile = false;
   private pendingSymbol?: string;
+  /** Show the solution report once the webview shows the file. */
+  private pendingReport = false;
+  /** The solution report of the file as read (computed when first asked for). */
+  private report?: Promise<SolutionReport>;
+  private reportAbort?: AbortController;
 
   constructor(
     private readonly service: GdxService,
@@ -85,6 +92,7 @@ class ViewerSession implements vscode.Disposable {
 
   dispose() {
     clearTimeout(this.reloadTimer);
+    this.reportAbort?.abort();
     this.disposables.forEach((d) => d.dispose());
   }
 
@@ -114,16 +122,69 @@ class ViewerSession implements vscode.Disposable {
     const symbol = name === UNIVERSE ? { name } : this.symbols.find((s) => s.name.toLowerCase() === wanted);
     if (symbol) {
       this.pendingSymbol = symbol.name;
-      this.sendPendingSymbol();
+      this.pendingReport = false;
+      this.sendPending();
     }
     return !!symbol;
   }
 
-  /** Selects the symbol asked for by showSymbol once the webview shows the file. */
-  private sendPendingSymbol() {
-    if (this.pendingSymbol && this.webviewHasFile) {
+  /** Shows the viewer tab with the solution report of the file. */
+  showReport() {
+    this.reveal();
+    this.pendingReport = true;
+    this.pendingSymbol = undefined;
+    this.sendPending();
+  }
+
+  /** Selects the symbol asked for by showSymbol, or opens the report, once the webview shows the file. */
+  private sendPending() {
+    if (!this.webviewHasFile) {
+      return;
+    }
+    if (this.pendingSymbol) {
       this.post({ type: 'selectSymbol', name: this.pendingSymbol });
       this.pendingSymbol = undefined;
+    }
+    if (this.pendingReport) {
+      this.post({ type: 'showReport' });
+      this.pendingReport = false;
+    }
+  }
+
+  /** Sends the solution report of all variables and equations (see solutionReport.ts), with progress while it is computed. */
+  private async sendReport(refresh?: boolean) {
+    const info = this.info;
+    if (!info) {
+      return;
+    }
+    const gen = this.generation;
+    if (refresh || !this.report) {
+      this.reportAbort?.abort();
+      const abort = (this.reportAbort = new AbortController());
+      // In a promise: finding the tools may fail, which the report then shows.
+      const report = Promise.resolve().then(() =>
+        solutionReport(this.service.tools(), this.uri.fsPath, info.symbols, {
+          signal: abort.signal,
+          // Symbols the viewer has in memory are not read again.
+          cached: (symbol) => this.views.get(symbol.name),
+          onProgress: (done, total) => !abort.signal.aborted && this.post({ type: 'reportProgress', done, total }),
+        }),
+      );
+      report.catch(() => this.report === report && (this.report = undefined));
+      this.report = report;
+    }
+    // Answers of reports that were replaced (by a refresh or a reload of the file) are dropped.
+    const pending = this.report;
+    try {
+      const report = await pending;
+      if (gen === this.generation && pending === this.report) {
+        this.post({ type: 'report', report: showReport(report, defaultFormat()) });
+      }
+    } catch (err) {
+      if (gen === this.generation && pending === this.report) {
+        this.service.log(`Error in the solution report of ${this.uri.fsPath}: ${errorMessage(err)}`);
+        this.post({ type: 'reportError', message: errorMessage(err) });
+      }
     }
   }
 
@@ -236,6 +297,8 @@ class ViewerSession implements vscode.Disposable {
     const gen = ++this.generation;
     this.views.clear();
     this.uels = undefined;
+    this.reportAbort?.abort();
+    this.report = undefined;
     this.selection.reset();
     try {
       const tools = this.service.tools();
@@ -258,7 +321,7 @@ class ViewerSession implements vscode.Disposable {
       });
       // A hidden webview does not receive it: it asks again ('ready') when shown.
       this.webviewHasFile = this.panel.visible;
-      this.sendPendingSymbol();
+      this.sendPending();
     } catch (err) {
       if (gen === this.generation) {
         this.info = undefined;
@@ -383,6 +446,8 @@ class ViewerSession implements vscode.Disposable {
         return this.selection.update(m, () => this.orderedView(m.name));
       case 'code':
         return this.copyCode(m.name, m.language, m.target, m.state);
+      case 'report':
+        return this.sendReport(m.refresh);
       case 'image':
         return saveChartImage(m, `${this.savePath(path.basename(this.uri.fsPath)).replace(/\.gdx$/i, '')}_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
       case 'copy':

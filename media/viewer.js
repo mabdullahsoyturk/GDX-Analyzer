@@ -17,13 +17,15 @@
   ];
 
   /** Per symbol: filters, sorting, view and layout (like GAMS Studio, as long as the viewer is open). */
-  /** @type {{ selected?: string, symbolSearch?: any, symbolSort?: { key: string, desc: boolean }, grouped?: boolean, states?: Record<string, any>, exportOptions?: any, code?: { language: string, applyView: boolean } }} */
+  /** @type {{ selected?: string, symbolSearch?: any, symbolSort?: { key: string, desc: boolean }, grouped?: boolean, states?: Record<string, any>, exportOptions?: any, code?: { language: string, applyView: boolean }, report?: boolean }} */
   let saved = vscode.getState() || {};
   let states = saved.states || {};
   /** True once a view was restored (from the webview or the extension's saved state). */
   let restored = !!saved.selected;
   let file = null;
   let selected = saved.selected;
+  /** The solution report is shown instead of the selected symbol (kept while the webview is reloaded, not when the file is opened again). */
+  let reportOpen = !!saved.report;
   const MAX_STATES = 200;
   /** Type and dimension of a symbol: its saved view only applies while they stay the same. */
   const signatureOf = (name) => {
@@ -39,8 +41,8 @@
       const names = Object.keys(states);
       names.slice(0, Math.max(0, names.length - MAX_STATES)).forEach((n) => delete states[n]);
     }
-    // The last choices of the Export and Copy as Code dialogs are kept.
-    vscode.setState((saved = { selected, symbolSearch: symbolSearch.value, symbolSort, grouped: groupBox.checked, states, exportOptions: saved.exportOptions, code: saved.code }));
+    // The last choices of the Export and Copy as Code dialogs are kept, and whether the solution report is shown.
+    vscode.setState((saved = { selected, symbolSearch: symbolSearch.value, symbolSort, grouped: groupBox.checked, states, exportOptions: saved.exportOptions, code: saved.code, report: reportOpen }));
     persist();
   };
 
@@ -130,6 +132,188 @@
     const popup = openPopup(codeButton, content, { label: 'Copy as Python code' });
     languages.find((l) => l.querySelector('input').checked)?.querySelector('input').focus();
   }
+  // Solution report -----------------------------------------------------------
+
+  /** Records of each list shown at first, and added by "Show more". */
+  const REPORT_ROWS = 100;
+  /** The last report from the extension (ShownReport of src/solutionReport.ts), and the rows shown of each list. */
+  let report = null;
+  let reportRows = { infeasible: REPORT_ROWS, binding: REPORT_ROWS };
+  let reportButton = null;
+  const hasSolution = () => !!file && file.symbols.some((s) => s.type === 'Var' || s.type === 'Equ');
+
+  /** Shows the solution report instead of the selected symbol; the extension computes it when first asked for. */
+  function openReport(refresh) {
+    if (!file || !hasSolution()) return;
+    if (refresh || !report) {
+      report = null;
+      reportRows = { infeasible: REPORT_ROWS, binding: REPORT_ROWS };
+      reportEl.replaceChildren(reportHead(), h('div', { class: 'placeholder' }, 'Reading the variables and equations…'));
+    }
+    // Also when the report is shown: the extension keeps it and formats it again (e.g. after the number format changed).
+    vscode.postMessage({ type: 'report', refresh: !!refresh });
+    reportOpen = true;
+    showMain();
+    save();
+  }
+
+  /** Shows the selected symbol again (`requery`: ask for its records, e.g. after the report was closed). */
+  function closeReport(requery) {
+    if (!reportOpen) return;
+    reportOpen = false;
+    showMain();
+    save();
+    if (requery && selected) table.query();
+  }
+
+  function showMain() {
+    symHead.hidden = table.el.hidden = reportOpen;
+    reportEl.hidden = !reportOpen;
+    if (reportButton) reportButton.setAttribute('aria-pressed', reportOpen ? 'true' : 'false');
+    for (const el of symList.querySelectorAll('.sym.selected')) el.classList.toggle('dimmed', reportOpen);
+  }
+
+  function reportHead(sub) {
+    return h(
+      'div',
+      { class: 'symhead' },
+      h('span', { class: 'sig report-title' }, 'Solution Report'),
+      h('span', { class: 'desc' }, sub || ''),
+      h(
+        'div',
+        { class: 'actions' },
+        h('button', { title: 'Read the variables and equations again', onclick: () => openReport(true) }, 'Refresh'),
+        h('button', { title: 'Show the selected symbol again', onclick: () => closeReport(true) }, 'Close'),
+      ),
+    );
+  }
+
+  /**
+   * Shows a symbol with a solution filter (and sorted by |marginal|, largest first), as the
+   * report counts its records: other filters and a row-filtering search of the symbol are removed.
+   */
+  function openWithSolution(name, filter, sortByMarginal) {
+    const info = report && report.symbols.find((x) => x.name === name);
+    if (selected && selected !== name) save();
+    const st = Object.assign({}, stateOf(name) || {}, { solution: filter, columnFilters: [], page: 0, colPage: 0, view: 'list', sig: signatureOf(name) });
+    if (st.search && st.search.filterRows) st.search = { text: '' };
+    if (sortByMarginal && info && info.marginalColumn !== undefined) Object.assign(st, { sortColumn: info.marginalColumn, sortDescending: true, sortAbsolute: true });
+    states[name] = st;
+    showSymbol(name, true);
+  }
+
+  /** A clickable cell value (a count or a record) that opens a symbol. */
+  const link = (text, title, onclick) => h('button', { class: 'link', title, onclick }, text);
+
+  /** A list of report records: the first ones, with "Show more" for the others the extension sent. */
+  function recordList(key, records, total, columns, open) {
+    const shown = records.slice(0, reportRows[key]);
+    const body = shown.map((r) =>
+      h(
+        'tr',
+        null,
+        h('td', { class: 'name' }, link(r.record, `Show ${r.symbol} with ${key === 'infeasible' ? 'its records outside their bounds' : 'its binding records, largest |marginal| first'}`, () => open(r))),
+        ...columns.map(([, i, cls]) => h('td', { class: cls || 'num', title: r.exact[i] !== r.cells[i] ? r.exact[i] : undefined }, i === 'type' ? (r.type === 'Var' ? 'Variable' : 'Equation') : r.cells[i])),
+      ),
+    );
+    const more = records.length - shown.length;
+    const notShown = total - records.length;
+    return [
+      h('table', { class: 'symtable report-table' }, h('thead', null, h('tr', null, h('th', null, 'Record'), ...columns.map(([label, , cls]) => h('th', { class: cls || 'num' }, label)))), h('tbody', null, ...body)),
+      more > 0 ? h('div', { class: 'row' }, h('button', { onclick: () => ((reportRows[key] += REPORT_ROWS), renderReport()) }, `Show ${fmt.format(Math.min(more, REPORT_ROWS))} more`)) : null,
+      more <= 0 && notShown > 0 ? h('div', { class: 'muted small' }, `The report lists the first ${fmt.format(records.length)} of ${fmt.format(total)}: open a symbol for all of its records.`) : null,
+    ];
+  }
+
+  const plural = (n, what) => `${fmt.format(n)} ${what}${n === 1 ? '' : 's'}`;
+
+  function renderReport() {
+    if (!report) return;
+    const r = report;
+    const nVar = r.symbols.filter((s) => s.type === 'Var').length;
+    const nEqu = r.symbols.filter((s) => s.type === 'Equ').length;
+    const symbolsWith = (filter, type) => r.symbols.filter((s) => (s.counts[filter] || 0) > 0 && (!type || s.type === type)).length;
+    const worst = r.infeasible[0];
+    const strongest = r.binding[0];
+    const failed = r.symbols.filter((s) => s.error);
+    const cards = h(
+      'div',
+      { class: 'report-cards' },
+      h(
+        'div',
+        { class: 'card ' + (r.infeasibleCount ? 'bad' : 'good') },
+        h('div', { class: 'big' }, fmt.format(r.infeasibleCount)),
+        h('div', null, `record${r.infeasibleCount === 1 ? '' : 's'} outside their bounds`),
+        h('div', { class: 'muted small' }, worst ? `in ${plural(symbolsWith('infeasible'), 'symbol')}; largest ${worst.cells[4]} in ${worst.record}` : 'The solution is feasible.'),
+      ),
+      h(
+        'div',
+        { class: 'card' },
+        h('div', { class: 'big' }, fmt.format(r.bindingCount)),
+        h('div', null, `binding constraint${r.bindingCount === 1 ? '' : 's'}`),
+        h('div', { class: 'muted small' }, strongest ? `in ${plural(symbolsWith('marginal', 'Equ'), 'equation')}; largest |marginal| ${strongest.cells[4]} in ${strongest.record}` : 'No equation has a non-zero marginal.'),
+      ),
+    );
+    const sections = [cards];
+    if (failed.length) {
+      sections.push(h('div', { class: 'error' }, failed.map((s) => `${s.name}: ${s.error}`).join('\n')));
+    }
+    if (r.infeasibleCount) {
+      sections.push(
+        h('h3', null, `Records outside their bounds (${fmt.format(r.infeasibleCount)})`, h('span', { class: 'muted small' }, ' farthest outside first')),
+        ...recordList('infeasible', r.infeasible, r.infeasibleCount, [['Type', 'type', 'type'], ['Level', 0], ['Lower', 2], ['Upper', 3], ['Infeasibility', 4]], (x) => openWithSolution(x.symbol, 'infeasible')),
+      );
+    }
+    if (r.bindingCount) {
+      sections.push(
+        h('h3', null, `Binding constraints (${fmt.format(r.bindingCount)})`, h('span', { class: 'muted small' }, ' equations with a non-zero or EPS marginal, largest |marginal| first')),
+        ...recordList('binding', r.binding, r.bindingCount, [['Level', 0], ['Marginal', 1], ['Lower', 2], ['Upper', 3]], (x) => openWithSolution(x.symbol, 'marginal', true)),
+      );
+    }
+    // Per symbol: each count opens the symbol with that solution filter.
+    const count = (s, filter, sortByMarginal) => {
+      const n = s.counts[filter];
+      if (n === undefined) return h('td', { class: 'num' }, '');
+      return h('td', { class: 'num' + (filter === 'infeasible' && n ? ' bad' : '') }, n ? link(fmt.format(n), `Show these records of ${s.name}`, () => openWithSolution(s.name, filter, sortByMarginal)) : '0');
+    };
+    const amount = ([shown, exact]) => h('td', { class: 'num', title: exact !== shown ? exact : undefined }, shown);
+    const symbolRows = r.symbols.map((s) =>
+      h(
+        'tr',
+        null,
+        h('td', { class: 'name' }, link(s.name, `Show ${s.name}`, () => showSymbol(s.name)), s.dim ? h('span', { class: 'dom' }, `(${s.domain.join(',')})`) : null),
+        h('td', { class: 'type' }, typeLabel(s)),
+        h('td', { class: 'num' }, fmt.format(s.records)),
+        s.error ? h('td', { class: 'text', colspan: 6, title: s.error }, 'Not read: ' + s.error) : count(s, 'infeasible'),
+        ...(s.error ? [] : [amount(s.shown.maxInfeasibility), count(s, 'marginal', true), amount(s.shown.maxMarginal), count(s, 'atLower'), count(s, 'atUpper')]),
+      ),
+    );
+    const headers = [
+      ['Symbol', ''],
+      ['Type', ''],
+      ['Records', 'num'],
+      ['Outside bounds', 'num', 'Records whose level is below its lower or above its upper bound'],
+      ['Max infeasibility', 'num', 'How far the level of the record farthest outside its bounds is outside them'],
+      ['Non-zero marginal', 'num', 'Records with a non-zero or EPS marginal: binding constraints and nonbasic variables'],
+      ['Max |marginal|', 'num', 'The largest absolute marginal (EPS counts as 0)'],
+      ['At lower', 'num', 'Records whose level is at its finite lower bound'],
+      ['At upper', 'num', 'Records whose level is at its finite upper bound'],
+    ];
+    sections.push(
+      h('h3', null, 'Variables and equations'),
+      h('table', { class: 'symtable report-table' }, h('thead', null, h('tr', null, ...headers.map(([label, cls, title]) => h('th', { class: cls, title }, label)))), h('tbody', null, ...symbolRows)),
+      h('div', { class: 'muted small' }, 'Levels and bounds are compared with a tolerance of 1e-6 (relative to bounds above 1); EPS counts as 0. Numbers are shown in the default format (gdxAnalyzer.numberFormat); hover a value to see it exactly.'),
+    );
+    reportEl.replaceChildren(reportHead(`${plural(nVar, 'variable')}, ${plural(nEqu, 'equation')}`), h('div', { class: 'report-body' }, ...sections));
+  }
+
+  /** Selects a symbol from the report and shows it in the symbol list. */
+  function showSymbol(name, force) {
+    select(name, force);
+    const row = symList.querySelector('.sym.selected');
+    if (row) row.scrollIntoView({ block: 'nearest' });
+  }
+
   /** The symbols of the file without the universe (the list of unique elements). */
   const realSymbols = () => file.symbols.filter((s) => !s.universe);
   /** Like signature(), but the universe is just "*". */
@@ -176,7 +360,9 @@
   const symList = h('div', { class: 'symlist', role: 'listbox', 'aria-label': 'Symbols' });
   listKeyNav(symList, '.sym');
   const symHead = h('div', { class: 'symhead' });
-  const main = h('div', { class: 'main' }, symHead, table.el);
+  const reportEl = h('div', { class: 'report', role: 'region', 'aria-label': 'Solution report' });
+  reportEl.hidden = true;
+  const main = h('div', { class: 'main' }, symHead, table.el, reportEl);
 
   function applySymbolFilter() {
     const rx = compileSearch(symbolSearch.value);
@@ -299,7 +485,7 @@
     return h(
       'tr',
       {
-        class: 'sym' + (s.name === selected ? ' selected' : ''),
+        class: 'sym' + (s.name === selected ? ' selected' + (reportOpen ? ' dimmed' : '') : ''),
         role: 'option',
         tabindex: 0,
         'aria-selected': s.name === selected ? 'true' : 'false',
@@ -386,6 +572,9 @@
         h('button', { onclick: () => action('refresh'), title: 'Read the file again' }, 'Refresh'),
         h('button', { onclick: () => action('dumpAll'), title: 'Open the gdxdump output of the whole file' }, 'gdxdump File'),
         h('button', { onclick: () => action('compare'), title: 'Compare this file with another GDX file (gdxdiff)' }, 'Compare…'),
+        (reportButton = hasSolution()
+          ? h('button', { onclick: () => (reportOpen ? closeReport(true) : openReport()), title: 'Records outside their bounds, binding constraints and levels at bounds of all variables and equations' }, 'Solution Report')
+          : null),
         (exportButton = h('button', { onclick: () => openExport(), title: 'Export symbols to Excel, laid out like the viewer shows them' }, 'Export…')),
       ),
     );
@@ -406,6 +595,11 @@
     );
     app.replaceChildren(header, info, h('div', { class: 'body' }, sidebar, main));
 
+    // The report of the file read before is outdated.
+    const showReport = reportOpen && hasSolution();
+    reportOpen = false;
+    report = null;
+    showMain();
     const current = file.symbols.find((s) => s.name === selected);
     if (current) {
       select(current.name, true);
@@ -415,6 +609,7 @@
       symHead.replaceChildren();
       table.showMessage('This GDX file contains no symbols.');
     }
+    if (showReport) openReport();
   }
 
   function select(name, force) {
@@ -426,6 +621,7 @@
     for (const el of symList.querySelectorAll('.sym')) {
       const on = /** @type {HTMLElement} */ (el).dataset.name === name;
       el.classList.toggle('selected', on);
+      el.classList.toggle('dimmed', on && reportOpen);
       el.setAttribute('aria-selected', on ? 'true' : 'false');
     }
     fill(
@@ -439,6 +635,7 @@
     exportCsvButton.hidden = dumpButton.hidden = codeButton.hidden = !!s.universe;
     if (changed) table.reset(stateOf(name));
     table.setDimension(s.dim);
+    closeReport(false);
     table.query();
   }
 
@@ -471,14 +668,25 @@
       case 'openExport':
         openExport();
         break;
-      case 'selectSymbol': {
+      case 'selectSymbol':
         // From a link in GAMS or Python source.
-        if (!file) break;
-        select(m.name);
-        const row = symList.querySelector(`.sym.selected`);
-        if (row) row.scrollIntoView({ block: 'nearest' });
+        if (file) showSymbol(m.name);
         break;
-      }
+      case 'showReport':
+        // From the command GDX: Show Solution Report.
+        openReport();
+        break;
+      case 'reportProgress':
+        if (reportOpen && !report) reportEl.replaceChildren(reportHead(), h('div', { class: 'placeholder' }, `Reading the variables and equations… ${fmt.format(m.done)} of ${fmt.format(m.total)}`));
+        break;
+      case 'report':
+        if (!reportOpen) break;
+        report = m.report;
+        renderReport();
+        break;
+      case 'reportError':
+        if (reportOpen) reportEl.replaceChildren(reportHead(), h('div', { class: 'error' }, m.message));
+        break;
       case 'resetState':
         states = {};
         symbolSearch.set({ text: '' });
@@ -494,7 +702,9 @@
         if (m.name === selected) table.show(m.page);
         break;
       case 'requery':
-        if (selected) table.query();
+        // E.g. the number format changed.
+        if (reportOpen) openReport();
+        else if (selected) table.query();
         break;
       case 'columnValues':
         if (m.name === selected) table.showColumnValues(m);
