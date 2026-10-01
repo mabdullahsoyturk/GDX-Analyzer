@@ -64,8 +64,8 @@ choose; records missing in a scenario count as 0. Charts show a series per scena
 status, aggregation and totals work as in the viewer. The comparison is read again when a file changes.
 
 **Git.** **Compare with Git Revision…** (in the Explorer and the viewer) compares a GDX file with its last commit,
-its staged version or any commit of its history using gdxdiff. Clicking a changed GDX file in Source Control shows
-both versions side by side in the viewer.
+its staged version or any commit of its history using gdxdiff, or two of its revisions with each other. Clicking a
+changed GDX file in Source Control shows both versions side by side in the viewer.
 
 ### GAMS and Python code
 
@@ -99,6 +99,7 @@ available to agent mode in VS Code automatically. For Claude Code, Cursor and ot
 | `gdx_read_symbol` | Records as CSV with exact values; filters (including solution status), search, sorting and paging |
 | `gdx_symbol_stats` | Distinct labels per dimension; count, sum, mean, min, max and special values per field, optionally filtered |
 | `gdx_compare` | The differing symbols of two files, or the differing records of one symbol with Δ and Δ%, sortable by magnitude |
+| `gdx_compare_scenarios` | One symbol across several files, with Δ and Δ% from a base scenario; filters, sorting by magnitude and paging |
 
 ## Getting started
 
@@ -118,7 +119,7 @@ menu and the viewer.
 | Open in GDX Analyzer | Open a GDX file in the viewer |
 | Compare GDX Files (gdxdiff) | Compare two GDX files (more than two: as scenarios) |
 | Compare Scenarios… | Compare a symbol across several GDX files |
-| Compare with Git Revision… (gdxdiff) | Compare a GDX file with a version of it in Git |
+| Compare with Git Revision… (gdxdiff) | Compare a GDX file with a version of it in Git, or two versions with each other |
 | Show Symbol in GDX File | Open the symbol under the cursor in a GDX file the GAMS or Python document references |
 | Export to Excel… | Export symbols to an Excel workbook |
 | Export Symbol to CSV | Save the records of a symbol as CSV |

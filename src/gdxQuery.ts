@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { GdxFileInfo, loadFileInfo, loadSymbolColumns } from './gdxFile';
 import { GdxSymbol, parseDiffOutput, parseDomainInfo, parseUelTable } from './parse';
+import { scenarioNames, scenarioTable } from './scenario';
 import { BOUND_TOLERANCE, ColumnFilter, ColumnStats, SOLUTION_FILTERS, SolutionFilter, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
 import { DiffOptions, GdxTools } from './tools';
 
@@ -123,6 +124,34 @@ export const TOOL_SPECS: ToolSpec[] = [
     },
   },
   {
+    name: 'gdx_compare_scenarios',
+    title: 'Compare GDX scenarios',
+    description:
+      'Compares several GDX files as scenarios (e.g. the results of runs with different data). Without a symbol: the symbols of the files and their number of records in each. ' +
+      'With a symbol: its records in all files as CSV, one row per record and scenario (the Scenario column, named after the files), with the difference from the base scenario ' +
+      '(Δ = scenario − base; a record missing in a file counts as 0) and that difference in percent of |base| (Δ%; ±Inf if the base is 0) for the values of parameters and the ' +
+      'levels and marginals of variables and equations. Filter "Scenario" to see some files; sort by "Δ Level" (or "Δ% Value") with byMagnitude and descending for the largest changes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        files: { type: 'array', items: { type: 'string' }, minItems: 2, description: 'Paths of the GDX files (absolute, or relative to the working directory), in the order of the scenarios.' },
+        symbol: { type: 'string', description: 'Symbol name (case-insensitive). Without it, the symbols of the files are listed.' },
+        base: { type: ['integer', 'string'], description: 'The base scenario: its position in files (from 0) or its scenario name or file path (default: the first file).' },
+        filters: FILTERS,
+        solution: SOLUTION,
+        sortBy: { type: 'string', description: 'Column to sort by, e.g. "Δ Level" (default: by record, then scenario).' },
+        descending: { type: 'boolean', description: 'Sort in descending order.' },
+        byMagnitude: BY_MAGNITUDE,
+        fields: { type: 'array', items: { type: 'string' }, description: 'Value columns to include, e.g. ["Level", "Δ Level"] (default: all, see squeezeDefaults).' },
+        squeezeDefaults: { type: 'boolean', description: 'Leave out variable/equation fields that have their default value in every record (default true).' },
+        limit: LIMIT,
+        page: PAGE,
+      },
+      required: ['files'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'gdx_compare',
     title: 'Compare GDX files',
     description:
@@ -228,6 +257,8 @@ export class GdxQueries {
         return this.symbolStats(args);
       case 'gdx_compare':
         return this.compare(args);
+      case 'gdx_compare_scenarios':
+        return this.compareScenarios(args);
     }
     throw new QueryError(`Unknown tool ${name}.`);
   }
@@ -405,6 +436,11 @@ export class GdxQueries {
     const { file, stat } = this.file(args.file);
     const symbol = await this.symbol(file, stat, args.symbol);
     const view = await this.view(file, stat, symbol);
+    return this.records(view, args, [this.describe(symbol)]);
+  }
+
+  /** A page of the records of a view as CSV, with the filters, sorting, fields and paging of the arguments, after `header`. */
+  private records(view: TableView, args: Record<string, unknown>, header: string[], what = 'record'): string {
     const { limit, page } = this.paging(args);
     const columns = view.table.columns;
     let hidden: number[] = [];
@@ -425,7 +461,7 @@ export class GdxQueries {
       page,
       pageSize: limit,
     });
-    const lines = [`${this.describe(symbol)}`, this.range(result.offset, result.rows.length, result.filteredCount, result.totalCount)];
+    const lines = [...header, this.range(result.offset, result.rows.length, result.filteredCount, result.totalCount, what)];
     const squeezed = squeeze ? view.squeezableColumns().filter((c) => !result.columnIndex.includes(c)) : [];
     if (squeezed.length) {
       const defaults = view.table.defaults ?? [];
@@ -439,6 +475,75 @@ export class GdxQueries {
       lines.push(`(more: page=${result.page + 1})`);
     }
     return lines.join('\n');
+  }
+
+  private async compareScenarios(args: Record<string, unknown>): Promise<string> {
+    if (!Array.isArray(args.files) || args.files.length < 2) {
+      throw new QueryError('"files" must list at least two GDX files.');
+    }
+    const files = args.files.map((f, i) => this.file(f, `files[${i}]`));
+    const names = scenarioNames(files.map((f) => f.file));
+    const infos = await Promise.all(files.map(({ file, stat }) => this.info(file, stat)));
+    const base = this.scenarioBase(args.base, files.map((f) => f.file), names);
+    const header = [`Scenarios (base: ${names[base]}): ${names.map((n, i) => `${n} = ${files[i].file}`).join('; ')}`];
+    const find = (info: GdxFileInfo, name: string) => info.symbols.find((s) => s.name.toLowerCase() === name.toLowerCase());
+    if (typeof args.symbol !== 'string' || !args.symbol.trim()) {
+      // The symbols of all files, in the order of the first file that has them, with their records per file.
+      const all: GdxSymbol[] = [];
+      for (const info of infos) for (const s of info.symbols) if (!all.some((x) => x.name.toLowerCase() === s.name.toLowerCase())) all.push(s);
+      const lines = [...header, `${plural(all.length, 'symbol')}; records per scenario (empty: not in the file)`, csvLine(['name', 'type', 'dim', 'domain', 'text', ...names])];
+      for (const s of all) {
+        const counts = infos.map((info) => {
+          const x = find(info, s.name);
+          return x ? (x.type === 'Alias' ? 'yes' : String(x.records)) : '';
+        });
+        lines.push(csvLine([s.name, typeLabel(s), String(s.dim), s.dim ? s.domain.join(',') : '', s.text, ...counts]));
+      }
+      lines.push('Call gdx_compare_scenarios with "symbol" for its records in all scenarios.');
+      return lines.join('\n');
+    }
+    const name = args.symbol.trim();
+    const symbols = infos.map((info) => find(info, name));
+    const symbol = symbols[base] ?? symbols.find((s) => s);
+    if (!symbol) {
+      throw new QueryError(`None of the files has a symbol "${name}". Call gdx_compare_scenarios without "symbol" to list the symbols.`);
+    }
+    const missing = names.filter((_, i) => !symbols[i]);
+    const key = ['scenarios', base, ...files.map(({ file, stat }) => `${file}\0${stat.mtimeMs}\0${stat.size}`), symbol.name].join('\0');
+    const view = await cachedView(this.views, key, () => {
+      const v = (async () => {
+        const data = await Promise.all(files.map(async ({ file }, i) => ({ name: names[i], data: symbols[i] ? await loadSymbolColumns(this.tools(), file, symbols[i]!) : undefined })));
+        let table;
+        try {
+          table = scenarioTable(data, base, symbol);
+        } catch (err) {
+          throw new QueryError(err instanceof Error ? err.message : String(err));
+        }
+        // Agents get set elements without text as empty cells (not "Y" as in the viewer).
+        const view = new TableView({ ...table, setTexts: false });
+        const uels = await Promise.all(files.map(({ file, stat }) => this.cached(this.uels, file, stat, () => this.tools().dump(file, { uelTable: 'uels', noData: true }).then(parseUelTable))));
+        view.setUelOrder([...new Set([base, ...files.map((_, i) => i).filter((i) => i !== base)].flatMap((i) => uels[i]))]);
+        return view;
+      })();
+      v.catch(() => this.views.get(key) === v && this.views.delete(key));
+      return v;
+    });
+    const description = `${this.describe(symbol)}${missing.length ? ` (not in ${missing.join(', ')}: its records count as missing there)` : ''}`;
+    return this.records(view, args, [...header, description], 'row');
+  }
+
+  /** The base scenario: a position in the files, a scenario name or a file path (default: the first). */
+  private scenarioBase(arg: unknown, files: string[], names: string[]): number {
+    if (arg === undefined || arg === null || arg === '') return 0;
+    if (typeof arg === 'number' && Number.isInteger(arg) && arg >= 0 && arg < files.length) return arg;
+    if (typeof arg === 'string') {
+      const byName = names.findIndex((n) => n.toLowerCase() === arg.trim().toLowerCase());
+      if (byName >= 0) return byName;
+      const resolved = path.resolve(this.cwd, arg.trim().replace(/^~(?=$|[\\/])/, os.homedir()));
+      const byFile = files.indexOf(resolved);
+      if (byFile >= 0) return byFile;
+    }
+    throw new QueryError(`Invalid "base": use a position in files (0-${files.length - 1}), a scenario name (${names.join(', ')}) or one of the file paths.`);
   }
 
   private range(offset: number, shown: number, filtered: number, total: number, what = 'record'): string {

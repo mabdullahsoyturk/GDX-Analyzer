@@ -108,6 +108,9 @@ const tests: [string, () => Promise<void>][] = [
         return t?.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith('gdxAnalyzer.diff') ? t : undefined;
       });
       assert.equal(tab.label, 'transport1.gdx @ HEAD ↔ transport1.gdx (working tree)');
+      // Two revisions with each other.
+      await vscode.commands.executeCommand('gdxAnalyzer.compareWithRevision', t1, 'HEAD~1', 'HEAD');
+      await waitFor('comparison of two revisions', () => (vscode.window.tabGroups.activeTabGroup.activeTab?.label === 'transport1.gdx @ HEAD~1 ↔ transport1.gdx @ HEAD' ? true : undefined));
       // A git: URI (as in the diff editor of Source Control) opens in the viewer through a copy.
       await vscode.commands.executeCommand('vscode.openWith', api.toGitUri(t1, 'HEAD'), 'gdxAnalyzer.viewer');
       const viewer = await waitFor('viewer of the Git revision', () => {

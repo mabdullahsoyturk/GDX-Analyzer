@@ -40,17 +40,26 @@ async function gitApi(): Promise<GitAPI> {
   return git.getAPI(1);
 }
 
-/** A revision to compare with: the ref for Git and how to name it. */
+/** A version of the file: a revision (the ref for Git; '' is the staged version) or the working tree (null). */
 interface Revision {
-  ref: string;
+  ref: string | null;
   /** Shown in the comparison, e.g. "HEAD" or "a1b2c3d". */
   name: string;
 }
 
-/** Asks for the revision: HEAD, the staged version, a commit of the file's history or any ref. */
-async function pickRevision(repo: GitRepository, file: string): Promise<Revision | undefined> {
-  type Item = vscode.QuickPickItem & { revision?: Revision; other?: boolean };
+const WORKING_TREE: Revision = { ref: null, name: 'working tree' };
+
+/** A ref given to the command (e.g. in a keybinding's args) as a revision. */
+const revisionOf = (ref: string): Revision => ({ ref, name: ref === '' ? 'staged' : ref });
+
+/**
+ * Asks for a version: HEAD, the staged version, a commit of the file's history or any ref,
+ * and (with `workingTree`) the working tree; or (with `two`) to compare two revisions.
+ */
+async function pickRevision(repo: GitRepository, file: string, title: string, options: { two?: boolean; workingTree?: boolean } = {}): Promise<Revision | 'two' | undefined> {
+  type Item = vscode.QuickPickItem & { revision?: Revision; other?: boolean; two?: boolean };
   const items: Item[] = [
+    ...(options.workingTree ? [{ label: '$(file) Working Tree', description: 'The file as it is now', revision: WORKING_TREE }] : []),
     { label: '$(git-commit) HEAD', description: 'The last commit', revision: { ref: 'HEAD', name: 'HEAD' } },
     { label: '$(diff) Staged', description: 'The version in the index', revision: { ref: '', name: 'staged' } },
   ];
@@ -73,12 +82,27 @@ async function pickRevision(repo: GitRepository, file: string): Promise<Revision
     }
   }
   items.push({ label: '', kind: vscode.QuickPickItemKind.Separator }, { label: '$(edit) Other Revision…', description: 'A branch, tag or ref such as HEAD~2', other: true });
-  const picked = await vscode.window.showQuickPick(items, { title: `Compare ${path.basename(file)} with`, matchOnDescription: true });
+  if (options.two) {
+    items.push({ label: '$(git-compare) Two Revisions…', description: 'Compare two versions of the file with each other, e.g. HEAD~1 and HEAD', two: true });
+  }
+  const picked = await vscode.window.showQuickPick(items, { title, matchOnDescription: true });
+  if (picked?.two) {
+    return 'two';
+  }
   if (picked?.other) {
-    const ref = (await vscode.window.showInputBox({ title: `Compare ${path.basename(file)} with`, prompt: 'A branch, tag, commit or ref such as HEAD~2' }))?.trim();
-    return ref ? { ref, name: ref } : undefined;
+    const ref = (await vscode.window.showInputBox({ title, prompt: 'A branch, tag, commit or ref such as HEAD~2' }))?.trim();
+    return ref ? revisionOf(ref) : undefined;
   }
   return picked?.revision;
+}
+
+/** Asks for the two versions to compare: the first (older), then the second (newer, also the working tree). */
+async function pickTwo(repo: GitRepository, file: string): Promise<[Revision, Revision] | undefined> {
+  const name = path.basename(file);
+  const first = await pickRevision(repo, file, `Compare ${name}: the first (older) version`);
+  if (!first || first === 'two') return undefined;
+  const second = await pickRevision(repo, file, `Compare ${name} @ ${first.name} with`, { workingTree: true });
+  return second && second !== 'two' ? [first, second] : undefined;
 }
 
 /**
@@ -86,6 +110,9 @@ async function pickRevision(repo: GitRepository, file: string): Promise<Revision
  * comparison names it) and returns its path and how to show it.
  */
 async function revisionFile(repo: GitRepository, file: string, revision: Revision, storage: vscode.Uri): Promise<{ path: string; label: string }> {
+  if (revision.ref === null) {
+    return { path: file, label: `${file} (working tree)` };
+  }
   let data: Buffer;
   try {
     data = await repo.buffer(revision.ref, file);
@@ -115,8 +142,9 @@ export function registerGitCompare(
   onError: (err: unknown) => Promise<unknown>,
 ) {
   context.subscriptions.push(
-    // With `ref` (e.g. "HEAD" in a keybinding's args), that revision is compared without asking.
-    vscode.commands.registerCommand('gdxAnalyzer.compareWithRevision', async (arg?: unknown, ref?: unknown) => {
+    // With `ref` (e.g. "HEAD" in a keybinding's args), that revision is compared with the working tree without
+    // asking; with `ref2` too, the two revisions (e.g. "HEAD~1" and "HEAD"; '' is the staged version).
+    vscode.commands.registerCommand('gdxAnalyzer.compareWithRevision', async (arg?: unknown, ref?: unknown, ref2?: unknown) => {
       try {
         const uri = fileOf(arg) ?? current();
         if (!uri || uri.scheme !== 'file') {
@@ -128,12 +156,18 @@ export function registerGitCompare(
           vscode.window.showWarningMessage(`${path.basename(uri.fsPath)} is not in a Git repository that VS Code has open.`);
           return;
         }
-        const revision = typeof ref === 'string' ? { ref, name: ref === '' ? 'staged' : ref } : await pickRevision(repo, uri.fsPath);
-        if (!revision) {
+        let versions: [Revision, Revision] | undefined;
+        if (typeof ref === 'string') {
+          versions = [revisionOf(ref), typeof ref2 === 'string' ? revisionOf(ref2) : WORKING_TREE];
+        } else {
+          const picked = await pickRevision(repo, uri.fsPath, `Compare ${path.basename(uri.fsPath)} with`, { two: true });
+          versions = picked === 'two' ? await pickTwo(repo, uri.fsPath) : picked && [picked, WORKING_TREE];
+        }
+        if (!versions) {
           return;
         }
-        const old = await revisionFile(repo, uri.fsPath, revision, context.globalStorageUri);
-        compare(old.path, uri.fsPath, { [old.path]: old.label, [uri.fsPath]: `${uri.fsPath} (working tree)` });
+        const [a, b] = await Promise.all(versions.map((v) => revisionFile(repo, uri.fsPath, v, context.globalStorageUri)));
+        compare(a.path, b.path, { [a.path]: a.label, [b.path]: b.label });
       } catch (err) {
         await onError(err);
       }

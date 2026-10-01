@@ -8,7 +8,8 @@
   difference (Δ) and relative difference (Δ%) from a base scenario you choose. Charts show a series per scenario.
   Select the files in the Explorer and choose **Compare Scenarios…**.
 - **Git:** **Compare with Git Revision…** compares a GDX file with its last commit, its staged version or any commit
-  of its history. Clicking a changed GDX file in Source Control shows both versions in the viewer.
+  of its history, or two of its revisions with each other. Clicking a changed GDX file in Source Control shows both
+  versions in the viewer.
 - **Solution status filter** for variables and equations: records with a non-zero marginal (binding constraints),
   at their lower or upper bound, outside their bounds (infeasible), or not at their defaults, with the number of
   records of each.
@@ -23,8 +24,9 @@
   `gdxAnalyzer.links.enabled`.
 - **Copy as Code:** Python code that reads a symbol with GAMS Transfer or GAMSPy into a pandas DataFrame, with the
   filters, solution status, sorting, fields and table view of the viewer.
-- **MCP tools:** `gdx_read_symbol` and `gdx_symbol_stats` take a solution status filter; `gdx_compare` returns Δ% and
-  sorts by any column, also by magnitude.
+- **MCP tools:** `gdx_compare_scenarios` compares a symbol across several files with Δ and Δ% from a base scenario;
+  `gdx_read_symbol` and `gdx_symbol_stats` take a solution status filter; `gdx_compare` returns Δ% and sorts by any
+  column, also by magnitude.
 
 ### Changed
 

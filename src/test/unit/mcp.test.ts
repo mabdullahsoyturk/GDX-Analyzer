@@ -95,6 +95,29 @@ describe('GDX queries for agents', { skip: resolved ? false : 'GAMS tools not fo
     assert.match(await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport1.gdx' }), /no differences/);
   });
 
+  it('compares scenarios: the symbols of the files, and a symbol with Δ and Δ% from the base', async () => {
+    const files = ['transport1.gdx', 'transport2.gdx'];
+    const list = await queries.call('gdx_compare_scenarios', { files });
+    assert.match(list, /^Scenarios \(base: transport1\): transport1 = .*transport1\.gdx; transport2 = .*transport2\.gdx$/m);
+    assert.match(list, /^name,type,dim,domain,text,transport1,transport2$/m);
+    assert.match(list, /^x,Positive Variable,2,"i,j",shipment quantities in cases,6,6$/m);
+    assert.match(list, /^extra,Parameter,0,,.*,,1$/m);
+
+    const x = await queries.call('gdx_compare_scenarios', { files, symbol: 'x', fields: ['Level', 'Δ Level', 'Δ% Level'], sortBy: 'Δ% Level', byMagnitude: true, descending: true, limit: 2 });
+    assert.match(x, /Rows 1-2 of 12 rows/);
+    assert.match(x, /i,j,Scenario,Level,Δ Level,Δ% Level\nseattle,new-york,transport2,60,10,20\nsan-diego,new-york,transport2,265,-10,-3\.63/);
+    // Another base, by name; a filter on the scenario.
+    const base2 = await queries.call('gdx_compare_scenarios', { files, symbol: 'x', base: 'transport2', filters: { Scenario: ['transport1'] }, fields: ['Level', 'Δ Level'] });
+    assert.match(base2, /base: transport2/);
+    assert.match(base2, /^seattle,new-york,transport1,50,-10$/m);
+    // A symbol in only one file: its records count as missing in the other.
+    const extra = await queries.call('gdx_compare_scenarios', { files, symbol: 'extra' });
+    assert.match(extra, /\(not in transport1: its records count as missing there\)/);
+    await assert.rejects(queries.call('gdx_compare_scenarios', { files: ['transport1.gdx'] }), /at least two GDX files/);
+    await assert.rejects(queries.call('gdx_compare_scenarios', { files, base: 5 }), /Invalid "base"/);
+    await assert.rejects(queries.call('gdx_compare_scenarios', { files, symbol: 'nope' }), /None of the files has a symbol "nope"/);
+  });
+
   it('reports wrong arguments as query errors', async () => {
     await assert.rejects(queries.call('gdx_read_symbol', { file: 'missing.gdx', symbol: 'x' }), (e: Error) => e instanceof QueryError && /File not found/.test(e.message));
     await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'nope' }), /has no symbol "nope"/);
