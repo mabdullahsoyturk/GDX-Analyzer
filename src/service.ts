@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { GdxFileInfo, GdxSource, loadDomains, loadDumpText, loadFileInfo, loadSymbolColumns, loadSymbolCsv, loadSymbolList, loadUels } from './gdxFile';
+import { GdxFileInfo, GdxSource, compareFiles, loadDomains, loadDumpText, loadFileInfo, loadSymbolColumns, loadSymbolCsv, loadSymbolList, loadUels } from './gdxFile';
 import { GdxSymbol, SymbolColumns } from './parse';
 import { SelectionStatus } from './selectionStatus';
-import { BackendSetting, GdxTools, ResolvedTools, ToolNotFoundError, resolveTools } from './tools';
+import { BackendSetting, DiffOptions, GdxTools, ResolvedTools, RunResult, ToolNotFoundError, resolveTools } from './tools';
 
 export type { GdxFileInfo } from './gdxFile';
 
@@ -14,8 +14,7 @@ export class GdxService implements vscode.Disposable {
   private cached?: GdxTools;
   private readonly disposables: vscode.Disposable[] = [this.output, this.selectionStatus];
 
-  /** `bundledDirectory`: where the tools bundled with the extension are (if this package has them). */
-  constructor(private readonly bundledDirectory?: string) {
+  constructor() {
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('gdxAnalyzer')) {
@@ -40,7 +39,6 @@ export class GdxService implements vscode.Disposable {
       const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
       const resolved: ResolvedTools = resolveTools({
         backend: cfg.get<BackendSetting>('backend', 'auto'),
-        bundledDirectory: this.bundledDirectory,
         gamsSystemDirectory: cfg.get<string>('gamsSystemDirectory', ''),
         gamspyExecutable: cfg.get<string>('gamspyExecutable', ''),
         venvSearchRoots: (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath),
@@ -57,26 +55,19 @@ export class GdxService implements vscode.Disposable {
     return vscode.workspace.getConfiguration('gdxAnalyzer').get<string>('encoding', 'utf-8').trim() || 'utf-8';
   }
 
-  /** Setting gdxAnalyzer.reader: read GDX files with gdxdump instead of natively. */
-  private useGdxdump(): boolean {
-    return vscode.workspace.getConfiguration('gdxAnalyzer').get<string>('reader', 'native') === 'gdxdump';
+  /** Setting gdxAnalyzer.useGamsTools: read, dump and compare GDX files with gdxdump and gdxdiff instead of natively. */
+  useGamsTools(): boolean {
+    return vscode.workspace.getConfiguration('gdxAnalyzer').get<boolean>('useGamsTools', false);
   }
 
   /** How GDX files are read (natively unless set otherwise; the tools are only resolved when needed). */
   source(): GdxSource {
-    return { encoding: this.encoding(), useGdxdump: this.useGdxdump(), tools: () => this.tools(), log: (l) => this.log(l) };
+    return { encoding: this.encoding(), useGamsTools: this.useGamsTools(), tools: () => this.tools(), log: (l) => this.log(l) };
   }
 
-  /** How GDX files are read, for the headers of the viewer and the comparisons. */
+  /** How GDX files are read and compared, for the headers of the viewer and the comparisons. */
   describeReader(): string {
-    if (this.useGdxdump()) {
-      return describeTools(this.tools().tools);
-    }
-    try {
-      return `native GDX reader · ${describeTools(this.tools().tools)}`;
-    } catch {
-      return 'native GDX reader (no gdxdump/gdxdiff found)';
-    }
+    return this.useGamsTools() ? describeTools(this.tools().tools) : 'native GDX reader';
   }
 
   loadFile(file: string): Promise<GdxFileInfo> {
@@ -108,6 +99,11 @@ export class GdxService implements vscode.Disposable {
     return loadSymbolCsv(this.source(), file, symbol);
   }
 
+  /** Compares two files as gdxdiff does (see gdxFile.ts). */
+  compareFiles(file1: string, file2: string, diffFile: string, options: DiffOptions, signal?: AbortSignal): Promise<RunResult> {
+    return compareFiles(this.source(), file1, file2, diffFile, options, signal);
+  }
+
   /** The domain of each symbol of a file, by its lower-case name. */
   loadDomains(file: string): Promise<Map<string, string[]>> {
     return loadDomains(this.source(), file);
@@ -129,9 +125,6 @@ export class GdxService implements vscode.Disposable {
 }
 
 export function describeTools(t: ResolvedTools): string {
-  if (t.bundled) {
-    return `bundled gdxdump/gdxdiff${t.bundled.version ? ` (${t.bundled.version})` : ''}`;
-  }
   return t.backend === 'gams' ? `GAMS gdxdump/gdxdiff from ${t.location}` : `GAMSPy CLI (${t.location})`;
 }
 

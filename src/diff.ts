@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { dumpUri } from './dump';
 import { DiffSummary, GdxSymbol, parseDiffOutput } from './parse';
-import { GdxService, describeTools, errorMessage } from './service';
+import { GdxService, errorMessage } from './service';
 import { TableView, cachedView, diffColumnTable } from './table';
 import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage } from './tableHost';
 import { DiffOptions } from './tools';
@@ -119,7 +119,7 @@ export class DiffPanel implements vscode.Disposable {
         if (e.affectsConfiguration('gdxAnalyzer.numberFormat') || e.affectsConfiguration('gdxAnalyzer.squeezeDefaults') || e.affectsConfiguration('gdxAnalyzer.maxRowsPerPage') || e.affectsConfiguration('gdxAnalyzer.maxColumnsPerPage')) {
           this.panel.webview.postMessage({ type: 'requery' });
         }
-        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.reader')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.useGamsTools')) {
           // The labels are read again with the new encoding.
           this.views = new Map();
           this.panel.webview.postMessage({ type: 'requery' });
@@ -171,14 +171,13 @@ export class DiffPanel implements vscode.Disposable {
     const options = this.options ?? diffOptionsFromSettings();
     this.post({ type: 'running', file1: this.display(this.file1), file2: this.display(this.file2), options });
     try {
-      const tools = this.service.tools();
       await fs.promises.mkdir(this.workDir, { recursive: true });
       await fs.promises.rm(this.diffFile, { force: true });
       const [result, symbols1, symbols2] = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Window, title: 'gdxdiff' },
+        { location: vscode.ProgressLocation.Window, title: 'Comparing GDX files' },
         () =>
           Promise.all([
-            tools.diff(this.file1, this.file2, this.diffFile, options, { signal: abort.signal }),
+            this.service.compareFiles(this.file1, this.file2, this.diffFile, options, abort.signal),
             this.service.loadSymbolList(this.file1),
             this.service.loadSymbolList(this.file2),
           ]),
@@ -197,7 +196,7 @@ export class DiffPanel implements vscode.Disposable {
         protocol: PROTOCOL,
         file1: this.display(this.file1),
         file2: this.display(this.file2),
-        tools: describeTools(tools.tools),
+        tools: this.service.describeReader(),
         identical: summary.identical || result.exitCode === 0,
         entries: this.entries(summary),
         messages: summary.messages,

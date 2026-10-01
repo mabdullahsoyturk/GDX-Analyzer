@@ -1,16 +1,11 @@
 # Third-party notices
 
-The platform-specific packages of GDX Analyzer include `gdxdump`, `gdxdiff`, the GDX library and the
-runtime libraries they load (in `bin/`), taken without changes from the `gamspy_base` package of GAMS
-(https://pypi.org/project/gamspy-base/, the release named in `bin/VERSION`). They are the software of
-GAMS Development Corporation and are subject to the GAMS End User License Agreement, which is included
-as `bin/EULA.md`.
-
-The native GDX reader of GDX Analyzer (`src/gdxReader.ts`) reads the file format as the open-source GDX library
-does (https://github.com/GAMS-dev/gdx, `src/gxfile.cpp` and `src/gdlib/gmsstrm.cpp`), including its constants and
-the default records of variables and equations, and `src/gdxText.ts` writes the text of gdxdump as its source in
-that repository does (`src/tools/gdxdump/gdxdump.cpp`, `src/gdlib/strutilx.cpp`). The GDX library and its tools
-are distributed under the MIT license:
+GDX Analyzer reads, writes, dumps and compares GDX files as the open-source GDX library and its tools do
+(https://github.com/GAMS-dev/gdx): `src/gdxReader.ts` and `src/gdxWriter.ts` follow the file format of
+`src/gxfile.cpp` and `src/gdlib/gmsstrm.cpp`, including their constants and the default records of variables and
+equations; `src/gdxText.ts` follows gdxdump (`src/tools/gdxdump/gdxdump.cpp`, `src/gdlib/strutilx.cpp`) and
+`src/gdxDiff.ts` gdxdiff (`src/tools/gdxdiff/gdxdiff.cpp`). The GDX library and its tools are distributed under the
+MIT license:
 
 > Copyright (c) 2017-2026 GAMS Software GmbH <support@gams.com>
 > Copyright (c) 2017-2026 GAMS Development Corp. <support@gams.com>

@@ -3,7 +3,6 @@ out/
 *.vsix
 .vscode-test/
 .venv/
-# Built GDX tools (scripts/build-gdx-tools.sh) and the copy of one platform's tools in a package.
+# gdxdump and gdxdiff for the tests (scripts/fetch-gdx-tools.py).
 tools/
-bin/
 dist/

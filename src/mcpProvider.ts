@@ -15,19 +15,14 @@ function serverEnv(service: GdxService): Record<string, string> {
   if (encoding && encoding.toLowerCase() !== 'utf-8') {
     env.GDX_ENCODING = encoding;
   }
-  if (cfg.get<string>('reader', 'native') === 'gdxdump') {
-    env.GDX_READER = 'gdxdump';
+  if (cfg.get<boolean>('useGamsTools', false)) {
+    env.GDX_USE_GAMS_TOOLS = '1';
   }
   try {
     // The resolved tools, so that the server finds them like the extension does (e.g. in a workspace .venv).
     const tools = service.tools().tools;
-    if (tools.bundled) {
-      // The server finds the bundled tools itself (next to its script).
-      env.GDX_BACKEND = 'bundled';
-    } else {
-      env.GDX_BACKEND = tools.backend;
-      env[tools.backend === 'gams' ? 'GDX_GAMS_SYSTEM_DIRECTORY' : 'GDX_GAMSPY_EXECUTABLE'] = tools.location;
-    }
+    env.GDX_BACKEND = tools.backend;
+    env[tools.backend === 'gams' ? 'GDX_GAMS_SYSTEM_DIRECTORY' : 'GDX_GAMSPY_EXECUTABLE'] = tools.location;
   } catch {
     // Not found: the server reports it when a tool is called.
     env.GDX_BACKEND = cfg.get<string>('backend', 'auto');

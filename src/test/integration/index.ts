@@ -56,11 +56,11 @@ const tests: [string, () => Promise<void>][] = [
     'dumps files and symbols with gdxdump (GAMS backend)',
     async () => {
       const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
-      await cfg.update('reader', 'gdxdump', vscode.ConfigurationTarget.Global);
+      await cfg.update('useGamsTools', true, vscode.ConfigurationTarget.Global);
       try {
         await dumpTests('gams');
       } finally {
-        await cfg.update('reader', undefined, vscode.ConfigurationTarget.Global);
+        await cfg.update('useGamsTools', undefined, vscode.ConfigurationTarget.Global);
       }
     },
   ],
@@ -291,13 +291,13 @@ const tests: [string, () => Promise<void>][] = [
       const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
       await cfg.update('backend', 'gamspy', vscode.ConfigurationTarget.Global);
       await cfg.update('gamspyExecutable', gamspy, vscode.ConfigurationTarget.Global);
-      await cfg.update('reader', 'gdxdump', vscode.ConfigurationTarget.Global);
+      await cfg.update('useGamsTools', true, vscode.ConfigurationTarget.Global);
       try {
         await dumpTests('gamspy');
       } finally {
         await cfg.update('backend', undefined, vscode.ConfigurationTarget.Global);
         await cfg.update('gamspyExecutable', undefined, vscode.ConfigurationTarget.Global);
-        await cfg.update('reader', undefined, vscode.ConfigurationTarget.Global);
+        await cfg.update('useGamsTools', undefined, vscode.ConfigurationTarget.Global);
       }
     },
   ],

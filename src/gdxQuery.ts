@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { GdxFileInfo, GdxSource, loadDomains, loadFileInfo, loadSymbolColumns, loadUels } from './gdxFile';
+import { GdxFileInfo, GdxSource, compareFiles, loadDomains, loadFileInfo, loadSymbolColumns, loadUels } from './gdxFile';
 import { GdxSymbol, parseDiffOutput } from './parse';
 import { scenarioNames, scenarioTable } from './scenario';
 import { MAX_REPORT_RECORDS, SolutionReport, SymbolSolution, amountText, recordName, solutionReport } from './solutionReport';
@@ -257,11 +257,6 @@ export class GdxQueries {
     private readonly source: GdxSource,
     private readonly cwd = process.cwd(),
   ) {}
-
-  /** gdxdiff (and gdxdump, if the files are read with it). */
-  private tools() {
-    return this.source.tools();
-  }
 
   /** Removes the difference files. */
   dispose() {
@@ -658,13 +653,12 @@ export class GdxQueries {
       ignoreSetText: !!args.ignoreSetText,
       compareDefaults: !!args.compareDefaults,
     };
-    const tools = this.tools();
     const key = JSON.stringify([a.file, a.stat.mtimeMs, a.stat.size, b.file, b.stat.mtimeMs, b.stat.size, options]);
     let run = this.diffs.get(key);
     if (!run) {
       this.workDir ??= fs.mkdtempSync(path.join(os.tmpdir(), 'gdx-query-'));
       const diffFile = path.join(this.workDir, `diff${++this.diffCount}.gdx`);
-      run = tools.diff(a.file, b.file, diffFile, options).then((r) => ({ diffFile, stdout: r.stdout, exitCode: r.exitCode }));
+      run = compareFiles(this.source, a.file, b.file, diffFile, options).then((r) => ({ diffFile, stdout: r.stdout, exitCode: r.exitCode }));
       run.catch(() => this.diffs.delete(key));
       this.diffs.set(key, run);
       while (this.diffs.size > 4) {

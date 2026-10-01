@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Extracts gdxdump, gdxdiff and the libraries they load from the gamspy_base wheels on PyPI into
-tools/<platform>, for bundling with the extension (see scripts/package.sh and .gitlab-ci.yml).
+tools/<platform>, for the tests that compare the extension's own reading, dumping and comparing of
+GDX files with gdxdump and gdxdiff (GDX_TEST_GAMS_DIR, see CONTRIBUTING.md and .gitlab-ci.yml).
+The extension packages do not include them.
 
 usage: scripts/fetch-gdx-tools.py [--version X.Y.Z] [--out tools] [platform ...]
 
@@ -22,7 +24,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-# The gamspy_base (GAMS) release whose tools are bundled.
+# The gamspy_base (GAMS) release whose tools the tests compare with.
 DEFAULT_VERSION = "54.4.0"
 
 # Per platform: the wheel, and the files the tools need. The libraries are the dependency closure

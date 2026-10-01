@@ -1,11 +1,15 @@
 /**
- * Reading GDX files: the symbol list, the records of a symbol, the unique elements, and the text
- * gdxdump writes of them. They are read natively (gdxReader.ts, gdxText.ts) or, with `useGdxdump` or
- * for files the native reader does not support, with gdxdump. No dependency on `vscode`, so the MCP server (mcp.ts) can use it too.
+ * Reading and comparing GDX files: the symbol list, the records of a symbol, the unique elements,
+ * the text gdxdump writes of them, and the comparison of two files as gdxdiff does it. Done natively
+ * (gdxReader.ts, gdxText.ts, gdxDiff.ts) or, with `useGamsTools` or for files the native reader does
+ * not support, with gdxdump and gdxdiff. No dependency on `vscode`, so the MCP server (mcp.ts) can use it too.
  */
 import * as fs from 'fs';
+import * as path from 'path';
 import { GdxFormatError, GdxReader } from './gdxReader';
 import { dumpText, symbolCsv } from './gdxText';
+import { gdxDiff } from './gdxDiff';
+import type { DiffOptions, RunResult } from './tools';
 import { GdxSymbol, SymbolColumns, mergeDomainInfo, mergeSubtypes, parseDomainInfo, parseSubtypes, parseSymbolStream, parseSymbols, parseUelTable, parseVersionInfo } from './parse';
 import { GdxTools } from './tools';
 
@@ -18,8 +22,8 @@ export interface GdxFileInfo {
 export interface GdxSource {
   /** Encoding of labels and texts. */
   encoding: string;
-  /** Read with gdxdump instead of natively. */
-  useGdxdump?: boolean;
+  /** Read, dump and compare with gdxdump and gdxdiff instead of natively. */
+  useGamsTools?: boolean;
   /** gdxdump and gdxdiff (resolved when first needed: reading natively needs neither). */
   tools: () => GdxTools;
   log?: (line: string) => void;
@@ -27,7 +31,7 @@ export interface GdxSource {
 
 /** A source that reads with gdxdump of `tools` (e.g. for tests and the comparison of both). */
 export function gdxdumpSource(tools: GdxTools): GdxSource {
-  return { encoding: tools.encoding, useGdxdump: true, tools: () => tools };
+  return { encoding: tools.encoding, useGamsTools: true, tools: () => tools };
 }
 
 /** The tables of the most recently read files, read again when a file changes. */
@@ -55,7 +59,7 @@ async function nativeReader(file: string, encoding: string): Promise<GdxReader> 
  * (e.g. a big-endian file), when gdxdump is available.
  */
 async function read<T>(source: GdxSource, file: string, native: (reader: GdxReader) => T | Promise<T>, gdxdump: (tools: GdxTools) => Promise<T>): Promise<T> {
-  if (source.useGdxdump) {
+  if (source.useGamsTools) {
     return gdxdump(source.tools());
   }
   try {
@@ -161,4 +165,29 @@ export function loadSymbolCsv(source: GdxSource, file: string, symbol: string, s
     (r) => symbolCsv(r, symbol, signal),
     (tools) => tools.dump(file, { symbol, format: 'csv', csvAllFields: true, csvSetText: true }, { signal }),
   );
+}
+
+/**
+ * Compares two GDX files as gdxdiff does: the summary of differences (its console output) and the
+ * difference file. Exit code 0: no differences, 1: differences.
+ */
+export async function compareFiles(source: GdxSource, file1: string, file2: string, diffFile: string, options: DiffOptions = {}, signal?: AbortSignal): Promise<RunResult> {
+  if (source.useGamsTools) {
+    return source.tools().diff(file1, file2, diffFile, options, { signal });
+  }
+  try {
+    // With absolute paths, as gdxdiff is run (tools.ts): they are the texts of FilesCompared.
+    const { exitCode, stdout } = await gdxDiff(path.resolve(file1), path.resolve(file2), path.resolve(diffFile), options, signal);
+    return { exitCode, stdout, stderr: '' };
+  } catch (err) {
+    if (!(err instanceof GdxFormatError)) throw err;
+    let tools: GdxTools;
+    try {
+      tools = source.tools();
+    } catch {
+      throw err;
+    }
+    source.log?.(`Comparing with gdxdiff: ${err.message}`);
+    return tools.diff(file1, file2, diffFile, options, { signal });
+  }
 }

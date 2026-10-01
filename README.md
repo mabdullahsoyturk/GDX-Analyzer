@@ -4,11 +4,10 @@ Browse, chart and compare [GAMS](https://www.gams.com) GDX files in Visual Studi
 
 ![The GDX viewer: symbol list and a two-dimensional parameter in the table view](images/viewer.png)
 
-GDX Analyzer opens `.gdx` files in a fast, read-only viewer, compares files with gdxdiff, across scenarios and
+GDX Analyzer opens `.gdx` files in a fast, read-only viewer, compares files as gdxdiff does, across scenarios and
 with their Git history, links GAMS and Python code to the data, exports to Excel and Python, and gives AI agents
-read-only access to model data and solutions. GDX files are read, and their gdxdump text and CSV written, by the
-extension itself; `gdxdiff` (for comparisons) and `gdxdump` are included for Windows, macOS and Linux, so no GAMS
-installation is needed. See the [changelog](CHANGELOG.md) for what is new.
+read-only access to model data and solutions. GDX files are read, compared as gdxdiff does, and written as gdxdump
+text and CSV by the extension itself, so no GAMS installation is needed. See the [changelog](CHANGELOG.md) for what is new.
 
 > GDX Analyzer is an independent project by Muhammet Soyturk. It is not affiliated with or endorsed by GAMS.
 
@@ -66,7 +65,7 @@ heatmap switches to a diverging scale when values have both signs. Save a chart 
 
 ![Comparing two GDX files: both values, the difference and the relative difference](images/compare.png)
 
-**Two files.** Compare two files with gdxdiff and review each differing symbol record by record: the values of both
+**Two files.** Compare two files as gdxdiff does and review each differing symbol record by record: the values of both
 files, their difference (Δ) and relative difference in percent (Δ%), and records that exist in only one file. Sort a
 Δ or Δ% column by magnitude to see the largest changes first. Chart the differences, open a text diff of the gdxdump
 output, or save the difference file. All gdxdiff options (tolerances, fields, symbols to compare or skip, and more)
@@ -81,7 +80,7 @@ choose; records missing in a scenario count as 0. Charts show a series per scena
 status, aggregation and totals work as in the viewer. The comparison is read again when a file changes.
 
 **Git.** **Compare with Git Revision…** (in the Explorer and the viewer) compares a GDX file with its last commit,
-its staged version or any commit of its history using gdxdiff, or two of its revisions with each other. Clicking a
+its staged version or any commit of its history, or two of its revisions with each other. Clicking a
 changed GDX file in Source Control shows both versions side by side in the viewer.
 
 ### GAMS and Python code
@@ -105,7 +104,7 @@ of `$load`, `execute_unload` and similar statements, and for any other name in a
 `limit` in `limit = Equation(m, name="supply")`, `cap = m.addParameter("a")` or `price = m["p"]`. In a notebook, the
 GDX files read in other cells count too. Symbols with more than 200,000 records are previewed without them.
 
-![Hovering a Python name in GAMSPy code: limit = m["cap"] previews the equation cap of the GDX file](images/hover-gamspy.png)
+![Hovering a Python name in GAMSPy code: limit, read with m of cap, previews the equation cap of the GDX file](images/hover-gamspy.png)
 
 **Copy as Code.** Python code that reads a symbol into a pandas DataFrame with GAMS Transfer or GAMSPy and applies
 the view: filters, solution status, sorting, shown fields and the table view (as `pivot_table`, with aggregation and
@@ -166,8 +165,8 @@ menu and the viewer.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `gdxAnalyzer.reader` | `native` | Read GDX files, and write their text dumps and CSV, natively (faster) or with `gdxdump` |
-| `gdxAnalyzer.backend` | `auto` | Tools to use: `bundled`, `gams` (a GAMS installation) or `gamspy` (the GAMSPy CLI); `auto` prefers them in this order |
+| `gdxAnalyzer.useGamsTools` | `false` | Read, dump and compare GDX files with gdxdump and gdxdiff (of `gdxAnalyzer.backend`) instead of natively |
+| `gdxAnalyzer.backend` | `auto` | gdxdump and gdxdiff to use (with `useGamsTools`): `gams` (a GAMS installation) or `gamspy` (the GAMSPy CLI); `auto` prefers GAMS |
 | `gdxAnalyzer.gamsSystemDirectory` | | GAMS system directory for the `gams` backend (found automatically otherwise) |
 | `gdxAnalyzer.gamspyExecutable` | | `gamspy` executable for the `gamspy` backend (found automatically otherwise) |
 | `gdxAnalyzer.encoding` | `utf-8` | Encoding of labels and texts, e.g. `windows-1252` |
@@ -179,14 +178,15 @@ menu and the viewer.
 | `gdxAnalyzer.hover.enabled` | `true` | Previews of GDX files and symbols on hover in GAMS and Python source |
 | `gdxAnalyzer.maxRowsPerPage` | `500` | Rows loaded at once while scrolling |
 | `gdxAnalyzer.maxColumnsPerPage` | `100` | Columns per page in wide table views |
-| `gdxAnalyzer.diff.*` | | Default gdxdiff options: tolerances, field, set texts, defaults, domains, UEL order |
+| `gdxAnalyzer.diff.*` | | Default comparison options (those of gdxdiff): tolerances, field, set texts, defaults, domains, UEL order |
 
 ## Requirements
 
 - Visual Studio Code 1.101 or later.
-- Windows (x64), macOS (Intel and Apple silicon) or Linux (x64 and arm64). On other platforms, the viewer, hovers,
-  the solution report, text dumps, the CSV export and the MCP server work without further software; comparisons use
-  a [GAMS](https://www.gams.com) installation or [GAMSPy](https://gamspy.readthedocs.io) (`pip install gamspy`).
+- Any platform: GDX files are read, compared and dumped by the extension itself, so neither GAMS nor GAMSPy is
+  needed. gdxdump and gdxdiff of a [GAMS](https://www.gams.com) installation or of
+  [GAMSPy](https://gamspy.readthedocs.io) are only used with `gdxAnalyzer.useGamsTools`, and for GDX files the
+  extension cannot read itself.
 
 ## Performance
 
@@ -199,7 +199,7 @@ screen. Measured on an Intel Core i7-1260P with a 135 MB GDX file (Load with `gd
 | 1 million variable records | 0.12 s (0.9 s) | 58 MB | 0.3 s | 0.04 s | 0.07 s |
 | 10 million records (3 dimensions) | 0.4 s (3.8 s) | 250 MB | 5.2 s | 0.2 s | 0.6 s |
 
-Comparing two files with 2 million differing records takes about 1.7 seconds, most of it gdxdiff. Comparing 5
+Comparing two files with 2 million differing records takes about 1.9 seconds (4 seconds with gdxdiff). Comparing 5
 scenarios of a symbol with 1 million records each (5 million rows) takes 1.5 s and 310 MB for a parameter, and 1.9 s
 and 580 MB for a variable; the table view, a sort by Δ and a chart then take 0.1–1.6 s.
 
@@ -209,7 +209,7 @@ and 580 MB for a variable; the table view, a sort by Δ and a chart then take 0.
   through a temporary copy; comparisons, GAMS Connect instructions and Copy as Code need files on disk. vscode.dev is
   not supported.
 - The native reader reads GDX file formats 5 to 7, compressed or not, written with little-endian byte order (all
-  current platforms); other files are read with gdxdump.
+  current platforms); other files are read and compared with gdxdump and gdxdiff, if available.
 - Sums of relative differences (Δ%) and of the bounds and scale of variables and equations are left empty in
   aggregated cells and totals; mean, min, max and count are shown.
 - With the `gamspy` backend, file names must end in lower-case `.gdx`.
@@ -219,4 +219,5 @@ and 580 MB for a variable; the table view, a sort by Δ and a chart then take 0.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for building, testing and packaging the extension, and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the licenses of bundled components.
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the license of the GDX library, whose file format and tools the
+extension follows.

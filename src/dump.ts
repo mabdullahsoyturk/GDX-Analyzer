@@ -37,7 +37,7 @@ export class GdxDumpProvider implements vscode.TextDocumentContentProvider, vsco
     this.disposables.push(
       vscode.workspace.onDidCloseTextDocument(() => this.pruneWatchers()),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.reader')) {
+        if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.useGamsTools')) {
           this.refresh(() => true);
         }
       }),

@@ -11,13 +11,10 @@ import * as os from 'os';
 import * as path from 'path';
 
 export type Backend = 'gams' | 'gamspy';
-/** 'bundled': the tools shipped with the extension (taken from the gamspy_base package of GAMS). */
-export type BackendSetting = 'auto' | 'bundled' | Backend;
+export type BackendSetting = 'auto' | Backend;
 
 export interface ToolSettings {
   backend: BackendSetting;
-  /** The directory of the tools bundled with the extension (absent in packages without them). */
-  bundledDirectory?: string;
   gamsSystemDirectory?: string;
   gamspyExecutable?: string;
   /** Folders searched for a `.venv` / `venv` containing gamspy (usually the workspace folders). */
@@ -25,10 +22,8 @@ export interface ToolSettings {
 }
 
 export interface ResolvedTools {
-  /** The command line syntax: the bundled tools are the GAMS tools. */
+  /** The command line syntax. */
   backend: Backend;
-  /** The tools bundled with the extension; `version` names their release, e.g. "GAMS 54.4.0". */
-  bundled?: { version: string };
   /** GAMS backend: the system directory. GAMSPy backend: the gamspy executable. */
   location: string;
   gdxdump: string;
@@ -232,49 +227,9 @@ function resolveGamspy(settings: ToolSettings): ResolvedTools | undefined {
   return onPath ? make(onPath) : undefined;
 }
 
-/** The platform name of the bundled tools, as used by `vsce package --target` (e.g. linux-x64). */
-export function bundledTarget(): string {
-  return `${process.platform === 'win32' ? 'win32' : process.platform}-${process.arch}`;
-}
-
-function resolveBundled(settings: ToolSettings): ResolvedTools | undefined {
-  const dir = settings.bundledDirectory;
-  if (!dir || !hasGdxTools(dir)) {
-    return undefined;
-  }
-  if (!isWindows) {
-    // Unpacked extensions may lose the executable bit.
-    for (const tool of ['gdxdump', 'gdxdiff']) {
-      const file = path.join(dir, tool);
-      try {
-        if ((fs.statSync(file).mode & 0o111) === 0) fs.chmodSync(file, 0o755);
-      } catch {
-        // Reported when the tool is run.
-      }
-    }
-  }
-  let version = '';
-  try {
-    version = fs.readFileSync(path.join(dir, 'VERSION'), 'utf8').trim();
-  } catch {
-    // Unknown version.
-  }
-  return { backend: 'gams', bundled: { version }, location: dir, gdxdump: path.join(dir, exe('gdxdump')), gdxdiff: path.join(dir, exe('gdxdiff')) };
-}
-
 export function resolveTools(settings: ToolSettings): ResolvedTools {
-  const backend = settings.backend ?? 'auto';
-  if (backend === 'bundled' || backend === 'auto') {
-    const bundled = resolveBundled(settings);
-    if (bundled) {
-      return bundled;
-    }
-    if (backend === 'bundled') {
-      throw new ToolNotFoundError(
-        `This package of the extension has no bundled gdxdump/gdxdiff for ${bundledTarget()}. Install GAMS or GAMSPy and set the backend to auto, gams or gamspy.`,
-      );
-    }
-  }
+  // "bundled" (versions before 0.10.0 shipped the tools) and unknown values mean auto.
+  const backend: BackendSetting = settings.backend === 'gams' || settings.backend === 'gamspy' ? settings.backend : 'auto';
   if (backend === 'gams' || backend === 'auto') {
     const gams = resolveGams(settings);
     if (gams) {

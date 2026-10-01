@@ -452,7 +452,7 @@ export class GdxReader {
   }
 
   /** The domain of a symbol and its kind, as gdxSymbolGetDomainX (relaxed: names, regular: symbols). */
-  private domainOf(e: SymbolEntry): { domain: string[]; domainType: string } {
+  domainOf(e: SymbolEntry): { domain: string[]; domainType: string } {
     const domain = Array<string>(e.dim).fill('*');
     if (e.domainStrings) {
       e.domainStrings.forEach((d, k) => d > 0 && (domain[k] = this.domainStrings[d - 1] ?? '*'));

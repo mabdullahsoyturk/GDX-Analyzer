@@ -4,16 +4,15 @@
  * Claude Code can run it with `node out/mcp.js` (GDX: Copy MCP Server Configuration).
  *
  * The tools are found like in the extension; these environment variables set them:
- *   GDX_BACKEND                auto (default), bundled, gams or gamspy
+ *   GDX_BACKEND                auto (default), gams or gamspy
  *   GDX_GAMS_SYSTEM_DIRECTORY  GAMS system directory with gdxdump and gdxdiff
  *   GDX_GAMSPY_EXECUTABLE      gamspy executable (or its virtual environment)
  *   GDX_ENCODING               encoding of labels and texts (default utf-8)
- *   GDX_READER                 native (default) or gdxdump: how GDX files are read (gdxdiff always compares them)
+ *   GDX_USE_GAMS_TOOLS         1: read and compare GDX files with gdxdump and gdxdiff instead of natively
  *
  * The protocol is newline-delimited JSON-RPC 2.0 on stdin/stdout; logs go to stderr.
  * No dependency on `vscode`.
  */
-import * as path from 'path';
 import * as readline from 'readline';
 import { GdxQueries, QueryError, TOOL_SPECS } from './gdxQuery';
 import { BackendSetting, GdxTools, ToolError, ToolNotFoundError, resolveTools } from './tools';
@@ -58,7 +57,7 @@ export class McpServer {
     this.queries = new GdxQueries(
       {
         encoding: this.env.GDX_ENCODING?.trim() || 'utf-8',
-        useGdxdump: this.env.GDX_READER?.trim().toLowerCase() === 'gdxdump',
+        useGamsTools: /^(1|true|yes)$/i.test(this.env.GDX_USE_GAMS_TOOLS?.trim() ?? ''),
         tools: () => this.tools(),
         log: (l) => this.log(l),
       },
@@ -75,13 +74,11 @@ export class McpServer {
       const env = this.env;
       const resolved = resolveTools({
         backend: (env.GDX_BACKEND as BackendSetting) || 'auto',
-        // The tools bundled with the extension, next to out/.
-        bundledDirectory: path.join(__dirname, '..', 'bin'),
         gamsSystemDirectory: env.GDX_GAMS_SYSTEM_DIRECTORY,
         gamspyExecutable: env.GDX_GAMSPY_EXECUTABLE,
         venvSearchRoots: [process.cwd()],
       });
-      this.log(`Using ${resolved.bundled ? 'the bundled' : resolved.backend === 'gams' ? 'GAMS' : 'the GAMSPy CLI'} tools from ${resolved.location}`);
+      this.log(`Using ${resolved.backend === 'gams' ? 'GAMS' : 'the GAMSPy CLI'} tools from ${resolved.location}`);
       this.cachedTools = new GdxTools(resolved, (l) => this.log(l), env.GDX_ENCODING?.trim() || 'utf-8');
     }
     return this.cachedTools;
@@ -191,12 +188,22 @@ export function serveStdio() {
   const server = new McpServer((message) => process.stdout.write(JSON.stringify(message) + '\n'));
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   // Messages are handled concurrently; each answer carries the id of its request.
-  rl.on('line', (line) => void server.handleLine(line));
+  const pending = new Set<Promise<void>>();
+  rl.on('line', (line) => {
+    const handled = server.handleLine(line).finally(() => pending.delete(handled));
+    pending.add(handled);
+  });
   const stop = () => {
     server.dispose();
     process.exit(0);
   };
-  rl.on('close', stop);
+  // When the client closes its end, the requests still being handled are answered first.
+  rl.on('close', () => {
+    void Promise.allSettled([...pending]).then(() => {
+      server.dispose();
+      process.stdout.write('', () => process.exit(0));
+    });
+  });
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

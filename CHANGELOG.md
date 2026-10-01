@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.2
+## 0.10.0
 
 ### Added
 
@@ -17,15 +17,26 @@
 - **GAMSPy and GAMS Transfer symbols are links:** those of `read()`, `write()` and `loadRecordsFromGdx()`
   (`symbol_names=`, `symbols=` or a list after the file) and `m["x"]` of a container read from a file.
 - **Notebooks:** links, hovers and **GDX: Show Symbol in GDX File** also find the GDX files read in other cells.
-- **Native GDX reader:** GDX files are read by the extension itself instead of gdxdump: 5 to 9 times faster (10
-  million records in 0.4 s instead of 3.8 s), and without gdxdump, so the viewer, hovers, the solution report and the
-  MCP server work on any platform without GAMS. It reads the GDX file formats 5 to 7, compressed or not, and gives
-  the same records as gdxdump. Text dumps (**Dump to Text**, the text diff of comparisons) and **Export Symbol to
-  CSV** are written natively too, in gdxdump's format and as fast. Comparisons still use gdxdiff. Setting
-  `gdxAnalyzer.reader` (`native` or `gdxdump`); `GDX_READER` for the MCP server.
+- **No GAMS tools needed:** GDX files are read, compared and dumped by the extension itself instead of gdxdump and
+  gdxdiff, with the same results, so every feature works on any platform without GAMS.
+  - Reading is 5 to 9 times faster (10 million records in 0.4 s instead of 3.8 s). The GDX file formats 5 to 7 are
+    read, compressed or not.
+  - Comparisons give gdxdiff's summary and difference file, with all its options, and are as fast; with the reading
+    of the differences about twice as fast as before.
+  - Text dumps (**Dump to Text**, the text diff of comparisons) and **Export Symbol to CSV** are written in gdxdump's
+    format, as fast.
+  - Setting `gdxAnalyzer.useGamsTools` (and `GDX_USE_GAMS_TOOLS=1` for the MCP server) uses gdxdump and gdxdiff
+    instead.
+
+### Changed
+
+- **One package for all platforms:** the packages no longer include gdxdump and gdxdiff (the extension does not
+  need them). With `gdxAnalyzer.useGamsTools`, those of a GAMS installation or of GAMSPy are used; the `bundled`
+  value of `gdxAnalyzer.backend` is gone (a saved one means `auto`).
 
 ### Fixed
 
+- The MCP server exited when its client closed its input, before answering the requests still in progress.
 - The universe of files with more than 999 unique elements showed 0 labels (gdxdump writes the count as 1,000).
 - Text dumps of files with acronyms declare all of them (gdxdump writes an empty first one and leaves out the last).
 

@@ -1,9 +1,6 @@
-# Takes gdxdump/gdxdiff (and the libraries they load) from the gamspy_base wheels on PyPI, smoke-tests
-# them on each platform, tests the extension with them, packages one VSIX per platform (plus a
-# universal one without tools) and publishes them on tags.
-#
-# Runner tags as in the GAMS projects: linux, linux-arm64 (Docker), macos, macos-arm64 (shell),
-# windows (shell, PowerShell).
+# Tests the extension, packages it (one VSIX for all platforms: it reads, compares and dumps GDX
+# files itself) and publishes it on tags. The tests compare its results with those of gdxdump and
+# gdxdiff, taken from the gamspy_base wheel on PyPI (they are not part of the package).
 
 default:
   tags: [linux]
@@ -15,8 +12,6 @@ workflow:
     - when: always
 
 stages:
-  - fetch-tools
-  - smoke-test
   - test
   - package
   - publish
@@ -24,113 +19,37 @@ stages:
 variables:
   GAMSPY_BASE_VERSION:
     value: "54.4.0"
-    description: "Release of gamspy_base whose gdxdump and gdxdiff are bundled"
+    description: "Release of gamspy_base whose gdxdump and gdxdiff the tests compare with"
   NODE_IMAGE:
     value: node:22-bookworm
     description: "Image for testing and packaging the extension (Node.js and Python 3)"
 
-#### FETCH THE TOOLS ####
+#### TEST ####
 
-fetch-tools:
-  stage: fetch-tools
+# The unit tests, with gdxdump and gdxdiff for Linux x64 to compare with.
+test:
+  stage: test
   image: $NODE_IMAGE
   script:
-    # All platforms from their wheels (the Linux x64 tools are smoke-tested here).
-    - python3 scripts/fetch-gdx-tools.py --version "$GAMSPY_BASE_VERSION"
+    - python3 scripts/fetch-gdx-tools.py --version "$GAMSPY_BASE_VERSION" linux-x64
+    - npm ci
+    - npm run compile
+    - GDX_TEST_GAMS_DIR="$CI_PROJECT_DIR/tools/linux-x64" node --test "out/test/unit/*.test.js"
   cache:
     key: gamspy-base-$GAMSPY_BASE_VERSION
     paths:
       - tools/.cache/
-  artifacts:
-    name: "gdx-tools-$GAMSPY_BASE_VERSION"
-    paths:
-      - tools/linux-x64/
-      - tools/linux-arm64/
-      - tools/darwin-x64/
-      - tools/darwin-arm64/
-      - tools/win32-x64/
-    expire_in: 1 week
-
-#### SMOKE-TEST THE TOOLS ON THEIR PLATFORM ####
-
-.smoke-test-unix:
-  stage: smoke-test
-  needs: [fetch-tools]
-  # The job shell stops at the first failing command: outputs go to files (no pipes), and the
-  # exit code of gdxdiff (1: the files differ) is caught with `|| code=$?`.
-  script:
-    - chmod +x "tools/$TARGET/gdxdump" "tools/$TARGET/gdxdiff"
-    - work=$(mktemp -d)
-    - tools/$TARGET/gdxdump test/fixtures/transport1.gdx Symbols > "$work/symbols.txt"
-    - grep -q ' x ' "$work/symbols.txt"
-    # From the output's directory: gdxdiff writes a temporary file there and renames it.
-    - code=0; (cd "$work" && "$CI_PROJECT_DIR/tools/$TARGET/gdxdiff" "$CI_PROJECT_DIR/test/fixtures/transport1.gdx" "$CI_PROJECT_DIR/test/fixtures/transport2.gdx" "$work/diff.gdx") > "$work/diff.log" || code=$?
-    - cat "$work/diff.log"
-    - test "$code" = 1
-    - grep -q 'Data are different' "$work/diff.log"
-
-smoke-test-linux-arm64:
-  extends: .smoke-test-unix
-  tags: [linux-arm64]
-  image: $NODE_IMAGE
-  variables:
-    TARGET: linux-arm64
-
-smoke-test-darwin-x64:
-  extends: .smoke-test-unix
-  tags: [macos]
-  variables:
-    TARGET: darwin-x64
-
-smoke-test-darwin-arm64:
-  extends: .smoke-test-unix
-  tags: [macos-arm64]
-  variables:
-    TARGET: darwin-arm64
-
-smoke-test-win32-x64:
-  stage: smoke-test
-  needs: [fetch-tools]
-  tags: [windows]
-  script:
-    - $symbols = & .\tools\win32-x64\gdxdump.exe test\fixtures\transport1.gdx Symbols
-    - if ($LASTEXITCODE -ne 0 -or -not ($symbols -match ' x ')) { $symbols; throw 'gdxdump smoke test failed' }
-    - $work = Join-Path ([System.IO.Path]::GetTempPath()) ("gdx-smoke-" + [guid]::NewGuid()); New-Item -ItemType Directory -Path $work | Out-Null
-    # From the output's directory: gdxdiff writes a temporary file there and renames it.
-    - Push-Location $work; $diff = & "$env:CI_PROJECT_DIR\tools\win32-x64\gdxdiff.exe" "$env:CI_PROJECT_DIR\test\fixtures\transport1.gdx" "$env:CI_PROJECT_DIR\test\fixtures\transport2.gdx" (Join-Path $work 'diff.gdx'); $code = $LASTEXITCODE; Pop-Location
-    - $diff
-    - if ($code -ne 1 -or -not ($diff -match 'Data are different')) { throw "gdxdiff smoke test failed (exit code $code)" }
-
-#### TEST ####
-
-# The unit tests with the bundled Linux x64 tools.
-test:
-  stage: test
-  image: $NODE_IMAGE
-  needs: [fetch-tools]
-  script:
-    - npm ci
-    - npm run compile
-    - GDX_TEST_GAMS_DIR="$CI_PROJECT_DIR/tools/linux-x64" node --test "out/test/unit/*.test.js"
 
 #### PACKAGE ####
 
 package:
   stage: package
   image: $NODE_IMAGE
-  needs:
-    - fetch-tools
-    - smoke-test-linux-arm64
-    - smoke-test-darwin-x64
-    - smoke-test-darwin-arm64
-    - smoke-test-win32-x64
-    - test
+  needs: [test]
   script:
     - npm ci
     - npm run compile
-    - for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64; do scripts/package.sh "$target"; done
-    # Without tools, for other platforms: it uses a GAMS or GAMSPy installation.
-    - scripts/package.sh universal
+    - scripts/package.sh
     - ls -l dist
   artifacts:
     name: "gdx-analyzer-vsix"

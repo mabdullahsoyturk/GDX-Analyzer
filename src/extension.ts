@@ -43,8 +43,7 @@ function isKnownEncoding(label: string): boolean {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  // Platform-specific packages carry gdxdump/gdxdiff in bin/ (see scripts/package.sh).
-  const service = new GdxService(path.join(context.extensionPath, 'bin'));
+  const service = new GdxService();
   const viewer = new GdxViewerProvider(context.extensionUri, service, new ViewStateStore(context.globalState), context.globalStorageUri);
   const dumps = new GdxDumpProvider(service);
   let selectedForCompare: vscode.Uri | undefined;
@@ -409,15 +408,15 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       'gdxAnalyzer.showToolInfo',
       guarded('Locating the GDX tools failed', async () => {
-        const native = service.source().useGdxdump ? 'GDX files: read with gdxdump' : 'GDX files: read natively';
+        const native = service.useGamsTools() ? 'GDX files: read and compared with gdxdump and gdxdiff' : 'GDX files: read and compared natively';
         let lines: string[];
         try {
           const tools = service.tools().tools;
           lines = [native, `Backend: ${describeTools(tools)}`, `gdxdump: ${tools.gdxdump}`, `gdxdiff: ${tools.gdxdiff}`];
         } catch (err) {
           // Reading natively needs no tools: say what else needs them.
-          if (service.source().useGdxdump) throw err;
-          lines = [native, `gdxdump/gdxdiff (for comparisons and text dumps): ${err instanceof Error ? err.message : String(err)}`];
+          if (service.useGamsTools()) throw err;
+          lines = [native, `gdxdump/gdxdiff (only used with gdxAnalyzer.useGamsTools): ${err instanceof Error ? err.message : String(err)}`];
         }
         lines.forEach((l) => service.log(l));
         const choice = await vscode.window.showInformationMessage(lines.slice(0, 2).join('. '), 'Show Log', 'Open Settings');

@@ -187,4 +187,25 @@ describe('MCP server', () => {
     assert.equal(answers.get(3).result.isError, true);
     assert.match(answers.get(3).result.content[0].text, /has no symbol/);
   });
+
+  it('answers the requests sent before the client closes its end', async () => {
+    // Read natively: no GAMS system needed.
+    const child = spawn(process.execPath, [path.resolve(__dirname, '../../mcp.js')], {
+      cwd: fixtures,
+      env: { ...process.env, GDX_BACKEND: 'gams', GDX_GAMS_SYSTEM_DIRECTORY: path.join(fixtures, 'no-gams-here') },
+    });
+    const lines: any[] = [];
+    readline.createInterface({ input: child.stdout }).on('line', (l) => lines.push(JSON.parse(l)));
+    const exited = new Promise<number | null>((resolve) => child.on('close', resolve));
+    const requests = [
+      { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
+      { id: 2, method: 'tools/call', params: { name: 'gdx_read_symbol', arguments: { file: 'transport1.gdx', symbol: 'a' } } },
+      { id: 3, method: 'tools/call', params: { name: 'gdx_solution_report', arguments: { file: 'solution.gdx' } } },
+    ];
+    child.stdin.end(requests.map((r) => JSON.stringify({ jsonrpc: '2.0', ...r })).join('\n') + '\n');
+    assert.equal(await exited, 0);
+    assert.deepEqual(lines.map((m) => m.id).sort(), [1, 2, 3]);
+    assert.match(lines.find((m) => m.id === 2).result.content[0].text, /seattle,350/);
+    assert.match(lines.find((m) => m.id === 3).result.content[0].text, /4 records outside their bounds/);
+  });
 });
