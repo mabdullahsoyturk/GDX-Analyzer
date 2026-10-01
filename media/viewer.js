@@ -17,7 +17,7 @@
   ];
 
   /** Per symbol: filters, sorting, view and layout (like GAMS Studio, as long as the viewer is open). */
-  /** @type {{ selected?: string, symbolSearch?: any, symbolSort?: { key: string, desc: boolean }, grouped?: boolean, states?: Record<string, any> }} */
+  /** @type {{ selected?: string, symbolSearch?: any, symbolSort?: { key: string, desc: boolean }, grouped?: boolean, states?: Record<string, any>, exportOptions?: any, code?: { language: string, applyView: boolean } }} */
   let saved = vscode.getState() || {};
   let states = saved.states || {};
   /** True once a view was restored (from the webview or the extension's saved state). */
@@ -39,7 +39,8 @@
       const names = Object.keys(states);
       names.slice(0, Math.max(0, names.length - MAX_STATES)).forEach((n) => delete states[n]);
     }
-    vscode.setState((saved = { selected, symbolSearch: symbolSearch.value, symbolSort, grouped: groupBox.checked, states }));
+    // The last choices of the Export and Copy as Code dialogs are kept.
+    vscode.setState((saved = { selected, symbolSearch: symbolSearch.value, symbolSort, grouped: groupBox.checked, states, exportOptions: saved.exportOptions, code: saved.code }));
     persist();
   };
 
@@ -87,13 +88,48 @@
   // Actions on the whole symbol, shown in the symbol header.
   const exportCsvButton = h('button', { title: 'Save all records of this symbol as CSV (gdxdump, without filters)', onclick: () => selected && action('exportCsv', { name: selected }) }, 'Export CSV…');
   const dumpButton = h('button', { title: 'Open the gdxdump output of this symbol', onclick: () => selected && action('dumpSymbol', { name: selected }) }, 'gdxdump');
+  const codeButton = h('button', { title: 'Python code that reads this symbol into a pandas DataFrame (GAMS Transfer or GAMSPy), with the filters and layout of the view', onclick: () => openCode() }, 'Copy as Code ▾');
   const symbolActions = h(
     'div',
     { class: 'actions' },
     h('button', { title: 'Copy the selected cells, or all filtered records, as tab separated text with exact values (right-click cells for more)', onclick: () => table.copy('tab', true, true) }, 'Copy'),
+    codeButton,
     exportCsvButton,
     dumpButton,
   );
+
+  /** Python code for the selected symbol: the library, whether to apply the view, and where to put it. */
+  function openCode() {
+    if (!selected) return;
+    const last = saved.code || { language: 'transfer', applyView: true };
+    const radio = (value, label, title) => {
+      const r = h('input', { type: 'radio', name: 'gdx-code-language', value });
+      r.checked = last.language === value;
+      return h('label', { class: 'check', title }, r, label);
+    };
+    const languages = [radio('transfer', 'GAMS Transfer', 'import gams.transfer as gt'), radio('gamspy', 'GAMSPy', 'import gamspy as gp')];
+    const applyView = h('input', { type: 'checkbox' });
+    applyView.checked = last.applyView !== false;
+    const run = (target) => {
+      const language = languages.map((l) => l.querySelector('input')).find((r) => r.checked).value;
+      saved.code = { language, applyView: applyView.checked };
+      vscode.setState(saved);
+      popup.close(true);
+      // The view as the table has it now (the saved one may be older).
+      vscode.postMessage({ type: 'code', name: selected, language, target, state: applyView.checked ? JSON.parse(JSON.stringify(table.state)) : undefined });
+    };
+    const content = h(
+      'div',
+      { class: 'filter-popup' },
+      h('div', { class: 'popup-title' }, 'Copy as Python Code'),
+      h('div', { class: 'col' }, ...languages),
+      h('label', { class: 'check', title: 'Filters, solution status, sorting, shown fields and the table view (pivot_table)' }, applyView, 'Apply the view'),
+      h('div', { class: 'muted small' }, 'Reads the symbol into a pandas DataFrame. What pandas cannot do like the viewer is noted in the code.'),
+      h('div', { class: 'row end' }, h('button', { class: 'primary', onclick: () => run('clipboard') }, 'Copy'), h('button', { onclick: () => run('editor'), title: 'Open the code in a new Python editor' }, 'Open in Editor')),
+    );
+    const popup = openPopup(codeButton, content, { label: 'Copy as Python code' });
+    languages.find((l) => l.querySelector('input').checked)?.querySelector('input').focus();
+  }
   /** The symbols of the file without the universe (the list of unique elements). */
   const realSymbols = () => file.symbols.filter((s) => !s.universe);
   /** Like signature(), but the universe is just "*". */
@@ -400,7 +436,7 @@
       s.domainType && s.domainType !== 'None' ? h('span', { class: 'badge', title: 'Domain checking' }, `${s.domainType} domain`) : null,
       symbolActions,
     );
-    exportCsvButton.hidden = dumpButton.hidden = !!s.universe;
+    exportCsvButton.hidden = dumpButton.hidden = codeButton.hidden = !!s.universe;
     if (changed) table.reset(stateOf(name));
     table.setDimension(s.dim);
     table.query();

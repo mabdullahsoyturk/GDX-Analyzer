@@ -82,6 +82,9 @@ references. Relative names are looked up next to the document, then in the works
   Optionally apply the filters and choose how special values are written. The same export can be saved as GAMS
   Connect instructions.
 - **CSV** of one symbol, and the **gdxdump output** of a file or symbol as a text document.
+- **Copy as Code:** Python code that reads a symbol into a pandas DataFrame with GAMS Transfer or GAMSPy and applies
+  the view: filters, solution status, sorting, shown fields and the table view (as `pivot_table`, with aggregation
+  and totals). Copy it or open it in a new editor.
 
 ### AI agents (MCP)
 

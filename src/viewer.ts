@@ -9,6 +9,7 @@ import { ExportItem, ExportOptions, SymbolViewState, buildSheets, connectInstruc
 import { ViewStateStore } from './viewState';
 import { writeXlsx } from './xlsx';
 import { PROTOCOL, webviewHtml } from './webview';
+import { CodeLanguage, symbolCode } from './codegen';
 
 class GdxDocument implements vscode.CustomDocument {
   constructor(readonly uri: vscode.Uri) {}
@@ -21,6 +22,7 @@ type FromWebview =
   | { type: 'export'; mode: 'excel' | 'connect'; names: string[]; options: ExportOptions; states: Record<string, SymbolViewState> }
   | { type: 'query'; name: string; query: WebviewQuery }
   | { type: 'columnValues'; name: string; column: number }
+  | { type: 'code'; name: string; language: CodeLanguage; target: 'clipboard' | 'editor'; state?: SymbolViewState }
   | CopyRequest
   | SelectionRequest
   | ImageMessage
@@ -163,6 +165,25 @@ class ViewerSession implements vscode.Disposable {
       }
     } catch (err) {
       this.service.showError('Exporting failed', err);
+    }
+  }
+
+  /** Python code that reads a symbol with its view (see codegen.ts), to the clipboard or a new editor. */
+  private async copyCode(name: string, language: CodeLanguage, target: 'clipboard' | 'editor', state?: SymbolViewState) {
+    const symbol = this.symbol(name);
+    if (!symbol) {
+      return;
+    }
+    try {
+      const code = symbolCode({ language, file: this.uri.fsPath, symbol, view: await this.orderedView(name), state, squeezeDefaults: squeezeDefaults() });
+      if (target === 'editor') {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'python', content: code }));
+      } else {
+        await vscode.env.clipboard.writeText(code);
+        vscode.window.setStatusBarMessage(`Copied ${language === 'gamspy' ? 'GAMSPy' : 'GAMS Transfer'} code for ${name}`, 3000);
+      }
+    } catch (err) {
+      this.service.showError(`Writing the code for ${name} failed`, err);
     }
   }
 
@@ -337,6 +358,8 @@ class ViewerSession implements vscode.Disposable {
         return;
       case 'selection':
         return this.selection.update(m, () => this.orderedView(m.name));
+      case 'code':
+        return this.copyCode(m.name, m.language, m.target, m.state);
       case 'image':
         return saveChartImage(m, `${this.uri.fsPath.replace(/\.gdx$/i, '')}_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
       case 'copy':
