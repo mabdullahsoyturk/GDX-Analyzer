@@ -311,7 +311,12 @@
         "gdxAnalyzer.links.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Make GDX file names in GAMS and Python source clickable (e.g. `$gdxIn data.gdx`, `execute_unload 'out.gdx', x;` or `Container(\"out.gdx\")`), and the symbols read or written by `$load`, `execute_load`, `execute_unload` etc., to open them in the GDX viewer."
+          "markdownDescription": "Make GDX file names in GAMS and Python source clickable (e.g. `$gdxIn data.gdx`, `execute_unload 'out.gdx', x;` or `Container(\"out.gdx\")`), and the symbols read or written by `$load`, `execute_load`, `execute_unload` etc. (in GAMSPy and GAMS Transfer: by `read()`, `write()` and `m[\"x\"]`), to open them in the GDX viewer."
+        },
+        "gdxAnalyzer.hover.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show previews on hover in GAMS and Python source: the symbols of GDX file names, and the first records, a summary of the values and the solution status of symbols of the GDX files the document references."
         },
         "gdxAnalyzer.maxRowsPerPage": {
           "type": "number",

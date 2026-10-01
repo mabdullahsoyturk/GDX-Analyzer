@@ -88,9 +88,23 @@ changed GDX file in Source Control shows both versions side by side in the viewe
 **Links.** GDX file names in `.gms` and Python files are links (Ctrl+click) that open the file in the viewer:
 `$gdxIn data`, `execute_unload 'results.gdx', x;`, `gdx=out.gdx` on a `$call` line, or
 `Container(load_from="data.gdx")` in GAMSPy. The symbols read or written by `$load`, `$unLoad`, `execute_load`,
-`execute_unload` and similar statements are links to that symbol in the file. Put the cursor on any symbol name and
+`execute_unload` and similar statements are links to that symbol in the file, and so are, in GAMSPy and GAMS
+Transfer code, the symbols of `read()`, `write()` and `loadRecordsFromGdx()` (`symbol_names=`, `symbols=` or a list
+after the file) and `m["x"]` of a container read from a file. Put the cursor on any symbol name and
 run **GDX: Show Symbol in GDX File** (also in the editor context menu) to open it in a GDX file the document
 references. Relative names are looked up next to the document, then in the workspace folders.
+
+![Hovering an equation in GAMS source: its records in the GDX file of the last run and how many are outside their bounds](images/hover.png)
+
+**Hover previews.** Hover a GDX file name to see its symbols by type, or a symbol name to see a preview from the
+file: its type, records and text, its first records, the minimum, maximum and sum of its values and, for variables
+and equations, how many records are outside their bounds, binding and at their bounds. This works for the symbols
+of `$load`, `execute_unload` and similar statements, and for any other name in a document that references GDX files
+(the nearest reference before the name first). In Python, a name also previews the symbol it is bound to, e.g.
+`limit` in `limit = Equation(m, name="supply")`, `cap = m.addParameter("a")` or `price = m["p"]`. In a notebook, the
+GDX files read in other cells count too. Symbols with more than 200,000 records are previewed without them.
+
+![Hovering a Python name in GAMSPy code: limit = m["cap"] previews the equation cap of the GDX file](images/hover-gamspy.png)
 
 **Copy as Code.** Python code that reads a symbol into a pandas DataFrame with GAMS Transfer or GAMSPy and applies
 the view: filters, solution status, sorting, shown fields and the table view (as `pivot_table`, with aggregation and
@@ -160,6 +174,7 @@ menu and the viewer.
 | `gdxAnalyzer.rememberViewState` | `true` | Remember the view of each file after it is closed |
 | `gdxAnalyzer.copy.decimalSeparator` | `period` | Decimal separator of copied numbers: `period`, `system` or `custom` |
 | `gdxAnalyzer.links.enabled` | `true` | Links from GDX file and symbol names in GAMS and Python source to the viewer |
+| `gdxAnalyzer.hover.enabled` | `true` | Previews of GDX files and symbols on hover in GAMS and Python source |
 | `gdxAnalyzer.maxRowsPerPage` | `500` | Rows loaded at once while scrolling |
 | `gdxAnalyzer.maxColumnsPerPage` | `100` | Columns per page in wide table views |
 | `gdxAnalyzer.diff.*` | | Default gdxdiff options: tolerances, field, set texts, defaults, domains, UEL order |

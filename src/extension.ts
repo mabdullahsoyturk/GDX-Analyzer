@@ -11,6 +11,7 @@ import { GdxViewerProvider } from './viewer';
 import { registerGitCompare } from './gitCompare';
 import { ScenarioPanel } from './scenarios';
 import { registerLinks } from './links';
+import { registerHovers } from './hovers';
 import { registerMcpServer } from './mcpProvider';
 
 const LARGE_FILE_BYTES = 100 * 1024 * 1024;
@@ -51,6 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
   for (const sub of ['diffs', 'copies', 'revisions']) cleanupDiffStorage(context.globalStorageUri, sub);
   registerMcpServer(context, service);
   registerLinks(context, (uri, symbol) => guarded('Opening the GDX file failed', showInViewer)(uri, symbol), hasSymbol);
+  registerHovers(context, service);
   registerGitCompare(
     context,
     () => currentGdx(),
@@ -337,7 +339,8 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       'gdxAnalyzer.solutionReport',
       guarded('Showing the solution report failed', async (arg?: unknown) => {
-        const uri = await gdxOrPick(arg, 'Solution Report of GDX File');
+        // A path from the link of a hover.
+        const uri = typeof arg === 'string' ? vscode.Uri.file(arg) : await gdxOrPick(arg, 'Solution Report of GDX File');
         if (!uri) {
           return;
         }

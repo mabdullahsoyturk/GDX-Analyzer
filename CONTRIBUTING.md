@@ -67,6 +67,7 @@ The GitLab pipeline (`.gitlab-ci.yml`):
 | `src/codegen.ts` | "Copy as Code": Python (GAMS Transfer, GAMSPy) for a symbol and its view |
 | `src/gdxQuery.ts`, `src/mcp.ts`, `src/mcpProvider.ts` | The MCP server for AI agents and its registration |
 | `src/gdxRefs.ts`, `src/links.ts` | GDX file and symbol references in GAMS and Python source, and their links to the viewer |
+| `src/preview.ts`, `src/hovers.ts` | Hover previews of GDX files and symbols in GAMS and Python source |
 | `src/solutionReport.ts` | The solution report of all variables and equations of a file (viewer and MCP) |
 | `src/scenario.ts`, `src/scenarios.ts` | The table of a symbol across scenarios, and the scenario comparison panel (`media/scenarios.js`) |
 | `src/gitCompare.ts` | Comparing a GDX file with a Git revision (through the Git extension of VS Code) |

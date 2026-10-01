@@ -9,6 +9,14 @@
   records outside their bounds, with a non-zero marginal and at their bounds. Click a record or a count to open the
   symbol with that solution status filter. **GDX: Show Solution Report**, or **Solution Report** in the viewer.
 - **MCP tool `gdx_solution_report`:** the same report for AI agents, e.g. to find out why a model is infeasible.
+- **Hover previews in GAMS and Python source:** a GDX file name shows the symbols of the file, and a symbol name
+  (in `$load`, `execute_unload` etc., or any name in a document that references GDX files) its first records, a
+  summary of its values and its solution status, with a link to the viewer. In GAMSPy and GAMS Transfer code, a
+  Python name previews the symbol it is bound to (`limit = Equation(m, name="supply")`, `cap = m.addParameter("a")`).
+  Setting `gdxAnalyzer.hover.enabled`.
+- **GAMSPy and GAMS Transfer symbols are links:** those of `read()`, `write()` and `loadRecordsFromGdx()`
+  (`symbol_names=`, `symbols=` or a list after the file) and `m["x"]` of a container read from a file.
+- **Notebooks:** links, hovers and **GDX: Show Symbol in GDX File** also find the GDX files read in other cells.
 
 ## 0.9.1
 

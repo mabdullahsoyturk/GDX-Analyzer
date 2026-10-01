@@ -9,14 +9,35 @@ import * as vscode from 'vscode';
 import { GdxReferences, gamsReferences, pythonReferences } from './gdxRefs';
 
 const SCHEMES = ['file', 'untitled', 'vscode-notebook-cell'];
-const SELECTOR: vscode.DocumentFilter[] = ['gams', 'python'].flatMap((language) => SCHEMES.map((scheme) => ({ language, scheme })));
+export const SELECTOR: vscode.DocumentFilter[] = ['gams', 'python'].flatMap((language) => SCHEMES.map((scheme) => ({ language, scheme })));
 export const SHOW_COMMAND = 'gdxAnalyzer.showInViewer';
 
 function linksEnabled(): boolean {
   return vscode.workspace.getConfiguration('gdxAnalyzer').get<boolean>('links.enabled', true);
 }
 
+/**
+ * The GDX references of a document. Of a notebook cell: those of all Python cells of its notebook
+ * (a file is usually read in an earlier cell than its symbols are used), with offsets relative to the
+ * cell, so that those of other cells lie before 0 or after its end.
+ */
 export function referencesOf(doc: vscode.TextDocument): GdxReferences {
+  if (doc.uri.scheme === 'vscode-notebook-cell' && doc.languageId === 'python') {
+    const id = doc.uri.toString();
+    const notebook = vscode.workspace.notebookDocuments.find((nb) => nb.getCells().some((c) => c.document.uri.toString() === id));
+    if (notebook) {
+      let text = '';
+      let base = 0;
+      for (const cell of notebook.getCells()) {
+        if (cell.kind !== vscode.NotebookCellKind.Code || cell.document.languageId !== 'python') continue;
+        if (cell.document.uri.toString() === id) base = text.length;
+        text += cell.document.getText() + '\n';
+      }
+      const refs = pythonReferences(text);
+      const shift = <T extends { start: number; end: number }>(list: T[]) => list.map((r) => ({ ...r, start: r.start - base, end: r.end - base }));
+      return { files: shift(refs.files), symbols: shift(refs.symbols), names: shift(refs.names ?? []) };
+    }
+  }
   return doc.languageId === 'python' ? pythonReferences(doc.getText()) : gamsReferences(doc.getText());
 }
 
@@ -37,7 +58,7 @@ export function candidatePaths(file: string, doc: vscode.TextDocument): string[]
   return [...new Set(dirs.filter((d): d is string => !!d).map((d) => path.resolve(d, file)))];
 }
 
-const existing = (paths: string[]) => paths.find((p) => fs.existsSync(p));
+export const existing = (paths: string[]) => paths.find((p) => fs.existsSync(p));
 
 function commandUri(paths: string[], symbol?: string): vscode.Uri {
   return vscode.Uri.parse(`command:${SHOW_COMMAND}?${encodeURIComponent(JSON.stringify([paths, symbol]))}`);
@@ -50,12 +71,15 @@ export class GdxLinkProvider implements vscode.DocumentLinkProvider {
     }
     const refs = referencesOf(doc);
     const range = (start: number, end: number) => new vscode.Range(doc.positionAt(start), doc.positionAt(end));
-    const files = refs.files.map((r) => {
+    // Not those of other cells of a notebook.
+    const length = doc.getText().length;
+    const inDocument = (r: { start: number; end: number }) => r.start >= 0 && r.end <= length;
+    const files = refs.files.filter(inDocument).map((r) => {
       const link = new vscode.DocumentLink(range(r.start, r.end), commandUri(candidatePaths(r.file, doc)));
       link.tooltip = `Open ${path.basename(r.file)} in GDX Analyzer`;
       return link;
     });
-    const symbols = refs.symbols.map((r) => {
+    const symbols = refs.symbols.filter(inDocument).map((r) => {
       const link = new vscode.DocumentLink(range(r.start, r.end), commandUri(candidatePaths(r.file, doc), r.name));
       link.tooltip = r.name === '*' ? `Show the unique elements of ${path.basename(r.file)}` : `Show ${r.name} in ${path.basename(r.file)}`;
       return link;

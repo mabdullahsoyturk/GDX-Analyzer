@@ -119,3 +119,91 @@ describe('GDX references in Python source', () => {
     });
   });
 });
+
+describe('GDX symbols in GAMSPy and GAMS Transfer code', () => {
+  it('finds the symbols read and written with symbol_names=, symbols= or a list after the file', () => {
+    const text = [
+      'm.write("results.gdx", symbol_names=["x", "z"])',
+      "c.read('in.gdx', symbols='a')",
+      'm.loadRecordsFromGdx(load_from="in.gdx", symbol_names=("d", "f"))',
+      'c.write("out.gdx", ["cost"])',
+      'm.read("in.gdx", symbol_names=names)',
+      'f.read()',
+    ].join('\n');
+    assert.deepEqual(shown(text, pythonReferences(text)).symbols, [
+      ['x', 'results.gdx'],
+      ['z', 'results.gdx'],
+      ['a', 'in.gdx'],
+      ['d', 'in.gdx'],
+      ['f', 'in.gdx'],
+      ['cost', 'out.gdx'],
+    ]);
+  });
+
+  it('finds m["x"] of a container read from a file, with the file it was last read from', () => {
+    const text = [
+      'import gamspy as gp',
+      'm = gp.Container(load_from="base.gdx")',
+      'x = m["x"]',
+      'c = gt.Container("t.gdx")',
+      "a = c['a']",
+      'other["y"]',
+      'm.read("run2.gdx")',
+      'price = m["p"]',
+    ].join('\n');
+    assert.deepEqual(shown(text, pythonReferences(text)).symbols, [
+      ['x', 'base.gdx'],
+      ['a', 't.gdx'],
+      ['p', 'run2.gdx'],
+    ]);
+  });
+
+  it('binds Python names to symbols of other names', () => {
+    const text = [
+      'm = Container(load_from="in.gdx")',
+      'limit = gp.Equation(m, name="supply", domain=i)',
+      'cost = Equation(m, "costDef")',
+      'x = Variable(m, "x")',
+      '    price = m["p"]',
+      'i, j = m["i"], m["j"]',
+      'dem = c.addParameter("demand", ["j"])',
+      'Model(m, objective=Sum(x, c), sense=Sense.MIN, problem = Equation(m, "nope"))',
+    ].join('\n');
+    const names = pythonReferences(text).names!;
+    for (const n of names) assert.equal(text.slice(n.start, n.end), n.name);
+    assert.deepEqual(
+      names.map((n) => [n.name, n.symbol]),
+      [
+        ['limit', 'supply'],
+        ['cost', 'costDef'],
+        ['price', 'p'],
+        ['dem', 'demand'],
+      ],
+    );
+  });
+
+  it('binds the names of symbols added with the add methods of a container', () => {
+    const text = [
+      'plants = c.addSet("i", records=["seattle", "san-diego"])',
+      'markets = m.addAlias("jj", j)',
+      'everything = c.addUniverseAlias("u")',
+      'cap = c.addParameter(name="a", domain=plants)',
+      'ship = m.addVariable("x", "positive", [plants, markets])',
+      'demand_eq = m.addEquation("demand", "geq", domain=markets)',
+      'every = UniverseAlias(m, "uu")',
+      'z = m.addVariable("z")',
+    ].join('\n');
+    assert.deepEqual(
+      pythonReferences(text).names!.map((n) => [text.slice(n.start, n.end), n.symbol]),
+      [
+        ['plants', 'i'],
+        ['markets', 'jj'],
+        ['everything', 'u'],
+        ['cap', 'a'],
+        ['ship', 'x'],
+        ['demand_eq', 'demand'],
+        ['every', 'uu'],
+      ],
+    );
+  });
+});

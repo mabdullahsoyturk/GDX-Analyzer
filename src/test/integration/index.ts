@@ -93,6 +93,73 @@ const tests: [string, () => Promise<void>][] = [
     },
   ],
   [
+    'previews GDX files and symbols on hover in GAMS source',
+    async () => {
+      const gms = await vscode.workspace.openTextDocument({
+        language: 'gams',
+        content: "$gdxIn transport1\n$load a\n$gdxIn\nParameter total; total = sum(i, a(i)) + x.l('seattle','chicago');\nexecute_unload 'not_written_yet.gdx', total;\n",
+      });
+      const hover = async (line: number, text: string) => {
+        // On the first character of the first occurrence of `text` as a whole word.
+        const character = gms.lineAt(line).text.search(new RegExp(`\\b${text.replace(/\./g, '\\.')}\\b`));
+        const hovers = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', gms.uri, new vscode.Position(line, character));
+        return hovers.flatMap((h) => h.contents.map((c) => (typeof c === 'string' ? c : c.value))).join('\n');
+      };
+      const file = await hover(0, 'transport1');
+      assert.match(file, /\*\*transport1\.gdx\*\* · 14 symbols: 2 sets, 1 alias, 6 parameters, 2 variables, 3 equations/);
+      assert.match(file, /\[Solution Report\]\(command:gdxAnalyzer\.solutionReport\?/);
+      assert.match(await hover(1, 'a'), /\*\*a\(i\)\*\* · Parameter · 2 records[\s\S]*\| seattle \| 350 \|/);
+      // Any name of a symbol of a file the document references.
+      const x = await hover(3, 'x.l');
+      assert.match(x, /\*\*x\(i,j\)\*\* · Positive Variable · 6 records/);
+      assert.match(x, /Solution: 0 outside bounds · 2 non-zero marginal/);
+      // The link to the viewer ends the first line (names in $load etc. are document links instead).
+      assert.match(x, /^\*\*x\(i,j\)\*\* .* · \[Show\]\(command:gdxAnalyzer\.showInViewer\?/m);
+      assert.doesNotMatch(await hover(1, 'a'), /\[Show\]/);
+      assert.equal(await hover(3, 'total'), '');
+      assert.match(await hover(4, 'not_written_yet'), /`not_written_yet\.gdx` does not exist \(yet\)/);
+    },
+  ],
+  [
+    'previews GDX symbols on hover in GAMSPy code and notebooks',
+    async () => {
+      const hoverAt = async (doc: vscode.TextDocument, line: number, text: string) => {
+        // On the first character of `text` (after a quote, on the name).
+        const character = doc.lineAt(line).text.indexOf(text) + (text.startsWith('"') ? 1 : 0);
+        const hovers = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', doc.uri, new vscode.Position(line, character));
+        return hovers.flatMap((h) => h.contents.map((c) => (typeof c === 'string' ? c : c.value))).join('\n');
+      };
+      const py = await vscode.workspace.openTextDocument({
+        language: 'python',
+        content: [
+          'import gamspy as gp',
+          'm = gp.Container(load_from="transport1.gdx")',
+          'limit = gp.Equation(m, name="supply", domain=m["i"])',
+          'dist = m.addParameter("d")',
+          'm.write("not_written_yet.gdx", symbol_names=["x"])',
+        ].join('\n'),
+      });
+      // Python names bound to symbols of other names.
+      assert.match(await hoverAt(py, 2, 'limit'), /^\*\*supply\(i\)\*\* · Equation/);
+      assert.match(await hoverAt(py, 3, 'dist'), /^\*\*d\(i,j\)\*\* · Parameter/);
+      // m["i"] of the container read from the file; the symbols written to a file that does not exist yet.
+      assert.match(await hoverAt(py, 2, '"i"'), /^\*\*i\(\\\*\)\*\* · Set/);
+      assert.match(await hoverAt(py, 4, '"x"'), /`not_written_yet\.gdx` does not exist/);
+
+      // A notebook: the file is read in the first cell, its symbols are used in the second.
+      const nb = await vscode.workspace.openNotebookDocument(
+        'jupyter-notebook',
+        new vscode.NotebookData([
+          new vscode.NotebookCellData(vscode.NotebookCellKind.Code, 'import gamspy as gp\nm = gp.Container(load_from="transport1.gdx")', 'python'),
+          new vscode.NotebookCellData(vscode.NotebookCellKind.Code, 'cost = m["c"]\ncost.records', 'python'),
+        ]),
+      );
+      const cell = nb.cellAt(1).document;
+      assert.match(await hoverAt(cell, 0, '"c"'), /^\*\*c\(i,j\)\*\* · Parameter/);
+      assert.match(await hoverAt(cell, 1, 'cost'), /^\*\*c\(i,j\)\*\* · Parameter/);
+    },
+  ],
+  [
     'compares a GDX file with its Git revision and views Git revisions',
     async () => {
       // The fixtures are committed in the repository of the extension, a parent of the workspace folder

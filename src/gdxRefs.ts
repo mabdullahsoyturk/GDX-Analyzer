@@ -6,7 +6,10 @@
  *   they read or write ($load, $unLoad and the symbol lists of these statements);
  * - GAMS: other names ending in ".gdx", quoted or not (e.g. `$call gams trnsport gdx=out.gdx`
  *   or `put_utility 'gdxOut' / 'out.gdx'`), also within strings such as shell commands;
- * - Python: string literals ending in ".gdx" (e.g. Container("out.gdx")).
+ * - Python: string literals ending in ".gdx" (e.g. Container("out.gdx")), and the symbols of GAMSPy and
+ *   GAMS Transfer: those read or written by read(), write() and loadRecordsFromGdx() (symbol_names=,
+ *   symbols= or a list after the file), and m["x"] of a container read from a file; also the Python names
+ *   bound to symbols (limit = Equation(m, name="supply"), x = m["x"], a = c.addParameter("a")).
  * Names with compile-time variables (%...%), Python f-string fields ({...}) or wildcards are skipped.
  *
  * No dependency on `vscode`.
@@ -30,9 +33,21 @@ export interface SymbolReference {
   file: string;
 }
 
+/** A Python name bound to a GDX symbol of another name, e.g. `limit = Equation(m, name="supply")`. */
+export interface NameBinding {
+  /** Offsets of the Python name where it is assigned. */
+  start: number;
+  end: number;
+  name: string;
+  /** The name of the symbol. */
+  symbol: string;
+}
+
 export interface GdxReferences {
   files: FileReference[];
   symbols: SymbolReference[];
+  /** Python only. */
+  names?: NameBinding[];
 }
 
 /** GAMS adds ".gdx" to GDX file names without an extension. */
@@ -211,7 +226,138 @@ function gdxNames(text: string): FileReference[] {
   return out;
 }
 
-/** GDX references in Python source (e.g. GAMSPy or GAMS Transfer): string literals ending in .gdx. */
+/** The offset of the parenthesis or bracket closing the one at `open` (skipping strings), or the end of the text. */
+function closing(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      const end = text.indexOf(c, i + 1);
+      const eol = text.indexOf('\n', i + 1);
+      if (end < 0 || (eol >= 0 && eol < end)) return text.length;
+      i = end;
+    } else if (c === '(' || c === '[') {
+      depth++;
+    } else if (c === ')' || c === ']') {
+      if (--depth === 0) return i;
+    }
+  }
+  return text.length;
+}
+
+/** The arguments of a call (or the items of a list) between `open` and its closing bracket, as offsets of their trimmed text. */
+function args(text: string, open: number): { start: number; end: number }[] {
+  const close = closing(text, open);
+  const out: { start: number; end: number }[] = [];
+  let from = open + 1;
+  for (let i = open + 1; i <= close; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      const end = text.indexOf(c, i + 1);
+      i = end < 0 || end > close ? close - 1 : end;
+    } else if (c === '(' || c === '[' || c === '{') {
+      i = c === '{' ? Math.max(i, text.indexOf('}', i)) : closing(text, i);
+    } else if (c === ',' || i === close) {
+      let a = from;
+      let b = i;
+      while (a < b && /\s/.test(text[a])) a++;
+      while (b > a && /\s/.test(text[b - 1])) b--;
+      if (b > a) out.push({ start: a, end: b });
+      from = i + 1;
+    }
+  }
+  return out;
+}
+
+/** The string literal at `start` (an argument): its content and offsets; undefined if it is not one. */
+function stringAt(text: string, start: number, end: number): { value: string; start: number; end: number } | undefined {
+  const m = /^[rRbBuU]?(["'])([^"'\r\n]*)\1$/.exec(text.slice(start, end));
+  return m ? { value: m[2], start: end - 1 - m[2].length, end: end - 1 } : undefined;
+}
+
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** GAMSPy and GAMS Transfer methods that read or write a GDX file given first, with the symbols after it. */
+const FILE_METHODS = /\.(read|write|loadRecordsFromGdx)\s*\(/g;
+// Assignments at the start of a line (not keyword arguments, not tuples).
+const CONTAINER = /^[ \t]*([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z_][\w.]*\.)?Container\s*\(/gm;
+const SYMBOL_CLASSES = /^[ \t]*([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z_][\w.]*\.)?(Set|Alias|Parameter|Variable|Equation|UniverseAlias)\s*\(/gm;
+const ADD_METHODS = /^[ \t]*([A-Za-z_]\w*)\s*=\s*[A-Za-z_][\w.]*\.add(Set|Alias|Parameter|Variable|Equation|UniverseAlias)\s*\(/gm;
+const INDEX = /\b([A-Za-z_]\w*)\s*\[\s*/g;
+
+/** GDX references in Python source (e.g. GAMSPy or GAMS Transfer). */
 export function pythonReferences(text: string): GdxReferences {
-  return { files: quotedGdx(text), symbols: [] };
+  const files = quotedGdx(text);
+  const symbols: SymbolReference[] = [];
+  const names: NameBinding[] = [];
+  const fileAt = (a: { start: number; end: number } | undefined) => {
+    const lit = a && stringAt(text, a.start, a.end);
+    return lit && files.find((f) => f.start === lit.start) ? lit.value : undefined;
+  };
+  /** The symbol names of a list, tuple or string argument. */
+  const symbolNames = (a: { start: number; end: number }, file: string) => {
+    const single = stringAt(text, a.start, a.end);
+    const items = single ? [a] : /[[(]/.test(text[a.start]) ? args(text, a.start) : [];
+    for (const item of items) {
+      const lit = stringAt(text, item.start, item.end);
+      if (lit && IDENTIFIER.test(lit.value)) symbols.push({ start: lit.start, end: lit.end, name: lit.value, file });
+    }
+  };
+  /** The value of the keyword argument `name` among the arguments of a call, as offsets. */
+  const keyword = (list: { start: number; end: number }[], name: string) => {
+    const a = list.find((x) => new RegExp(`^${name}\\s*=(?!=)`).test(text.slice(x.start, x.end)));
+    if (!a) return undefined;
+    let v = text.indexOf('=', a.start) + 1;
+    while (v < a.end && /\s/.test(text[v])) v++;
+    return { start: v, end: a.end };
+  };
+  const positional = (a: { start: number; end: number } | undefined) => (a && !/^\w+\s*=(?!=)/.test(text.slice(a.start, a.end)) ? a : undefined);
+  /** Which file a container was last read from, by offset: m = Container("in.gdx"), m.read("in.gdx"). */
+  const reads: { at: number; container: string; file: string }[] = [];
+
+  for (const m of text.matchAll(CONTAINER)) {
+    const list = args(text, m.index + m[0].length - 1);
+    const file = fileAt(keyword(list, 'load_from') ?? positional(list[0]));
+    if (file) reads.push({ at: m.index, container: m[1], file });
+  }
+  for (const m of text.matchAll(FILE_METHODS)) {
+    const list = args(text, m.index + m[0].length - 1);
+    const file = fileAt(keyword(list, '(?:load_from|write_to)') ?? positional(list[0]));
+    if (!file) continue;
+    const owner = /([A-Za-z_]\w*)$/.exec(text.slice(0, m.index));
+    if (m[1] !== 'write' && owner) reads.push({ at: m.index, container: owner[1], file });
+    const named = keyword(list, '(?:symbol_names|symbols)') ?? positional(list[1]);
+    if (named) symbolNames(named, file);
+  }
+  reads.sort((a, b) => a.at - b.at);
+
+  // m["x"]: a symbol of the file the container was last read from; x = m["x"] binds x.
+  for (const m of text.matchAll(INDEX)) {
+    const close = closing(text, m.index + m[0].lastIndexOf('['));
+    const lit = stringAt(text, m.index + m[0].length, close);
+    if (!lit || !IDENTIFIER.test(lit.value)) continue;
+    const read = reads.filter((r) => r.container === m[1] && r.at < m.index).pop();
+    if (read) symbols.push({ start: lit.start, end: lit.end, name: lit.value, file: read.file });
+    const lineStart = text.lastIndexOf('\n', m.index) + 1;
+    const assigned = /^[ \t]*([A-Za-z_]\w*)\s*=\s*$/.exec(text.slice(lineStart, m.index));
+    if (assigned && assigned[1] !== lit.value) {
+      const start = lineStart + assigned[0].indexOf(assigned[1]);
+      names.push({ start, end: start + assigned[1].length, name: assigned[1], symbol: lit.value });
+    }
+  }
+  // limit = Equation(m, name="supply") or Equation(m, "supply"); a = c.addParameter("a").
+  const bind = (m: RegExpMatchArray, nameArg: (list: { start: number; end: number }[]) => { start: number; end: number } | undefined) => {
+    const list = args(text, m.index! + m[0].length - 1);
+    const arg = keyword(list, 'name') ?? positional(nameArg(list));
+    const lit = arg && stringAt(text, arg.start, arg.end);
+    if (lit && IDENTIFIER.test(lit.value) && lit.value !== m[1]) {
+      const start = m.index! + m[0].indexOf(m[1]);
+      names.push({ start, end: start + m[1].length, name: m[1], symbol: lit.value });
+    }
+  };
+  for (const m of text.matchAll(SYMBOL_CLASSES)) bind(m, (list) => list[1]);
+  for (const m of text.matchAll(ADD_METHODS)) bind(m, (list) => list[0]);
+
+  symbols.sort((a, b) => a.start - b.start);
+  names.sort((a, b) => a.start - b.start);
+  return { files, symbols, names };
 }
