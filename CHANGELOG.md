@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.1
+
+### Added
+
+- **Scenario comparison for AI agents:** the MCP tool `gdx_compare_scenarios` lists the symbols of several GDX files,
+  or returns one symbol across them with Δ and Δ% from a base scenario, with filters, solution status, sorting by
+  magnitude and paging.
+- **Comparing two Git revisions** of a GDX file with each other (e.g. HEAD~1 and HEAD, or a commit and the working
+  tree): **Compare with Git Revision… → Two Revisions…**. Keybindings can pass two refs as arguments.
+
+### Changed
+
+- Totals and aggregated cells leave the sums of the bounds and scale of variables and equations empty, as for Δ%;
+  mean, min, max and count still show them. Copy as Code notes that pandas sums them.
+- The table view leaves out columns without any value, such as the differences of the base scenario in a scenario
+  comparison.
+
 ## 0.9.0
 
 ### Added
@@ -8,14 +25,12 @@
   difference (Δ) and relative difference (Δ%) from a base scenario you choose. Charts show a series per scenario.
   Select the files in the Explorer and choose **Compare Scenarios…**.
 - **Git:** **Compare with Git Revision…** compares a GDX file with its last commit, its staged version or any commit
-  of its history, or two of its revisions with each other. Clicking a changed GDX file in Source Control shows both
-  versions in the viewer.
+  of its history. Clicking a changed GDX file in Source Control shows both versions in the viewer.
 - **Solution status filter** for variables and equations: records with a non-zero marginal (binding constraints),
   at their lower or upper bound, outside their bounds (infeasible), or not at their defaults, with the number of
   records of each.
 - **Aggregation and totals in the table view:** drag dimensions to *Aggregated* to combine their records with sum,
-  mean, min, max or count, and add a total row and total columns. Sums of bounds, scales and Δ% are left empty, and
-  columns without any value (such as the differences of the base scenario) are left out.
+  mean, min, max or count, and add a total row and total columns.
 - **Relative differences in comparisons:** a Δ% column (in percent of file 1) next to each Δ column, also in charts.
 - **Sorting by magnitude:** a third click on the header of a number column sorts by absolute value, largest first,
   e.g. to find the largest changes.
@@ -25,9 +40,8 @@
   `gdxAnalyzer.links.enabled`.
 - **Copy as Code:** Python code that reads a symbol with GAMS Transfer or GAMSPy into a pandas DataFrame, with the
   filters, solution status, sorting, fields and table view of the viewer.
-- **MCP tools:** `gdx_compare_scenarios` compares a symbol across several files with Δ and Δ% from a base scenario;
-  `gdx_read_symbol` and `gdx_symbol_stats` take a solution status filter; `gdx_compare` returns Δ% and sorts by any
-  column, also by magnitude.
+- **MCP tools:** `gdx_read_symbol` and `gdx_symbol_stats` take a solution status filter; `gdx_compare` returns Δ% and
+  sorts by any column, also by magnitude.
 
 ### Changed
 
