@@ -135,6 +135,26 @@ describe('aggregation in the table view', () => {
     ]);
   });
 
+  it('does not sum the bounds and scale of variables, but takes their min, max and mean', () => {
+    const columns = ['i', 'j', 'Level', 'Marginal', 'Lower', 'Upper', 'Scale'];
+    const rows = [
+      ['a', 'x', '1', '0', '0', '10', '1'],
+      ['a', 'y', '2', '0', '0', '20', '1'],
+      ['b', 'x', '3', '1', '0', '+Inf', '1'],
+    ];
+    const view = new TableView(symbolTable({ columns, keyCount: 2, rows }, { type: 'Var', subtype: 'positive' }));
+    const sum = view.pivot({ rowDims: [0], colDims: [1], totals: true, pageSize: 100, colPageSize: 100 });
+    // The total columns: only Level and Marginal; the total row leaves the bounds and scale empty.
+    assert.deepEqual(sum.headers.slice(-2), [
+      ['Sum', 'Level'],
+      ['Sum', 'Marginal'],
+    ]);
+    assert.deepEqual(cells(sum).at(-1), ['Sum', '4', '1', '', '', '', '2', '0', '', '', '', '6', '1']);
+    const max = view.pivot({ rowDims: [0], colDims: [1], totals: true, aggregate: 'max', pageSize: 100, colPageSize: 100 });
+    assert.deepEqual(max.headers.slice(-5).map((h) => h[1]), ['Level', 'Marginal', 'Lower', 'Upper', 'Scale']);
+    assert.deepEqual(cells(max).at(-1)!.slice(-3), ['0', '+Inf', '1']);
+  });
+
   it('copies, searches and summarizes totals like other cells', () => {
     const view = parameter();
     const q = { rowDims: [0], colDims: [1], aggDims: [2], totals: true };

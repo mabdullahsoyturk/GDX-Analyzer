@@ -1195,7 +1195,26 @@ export class TableView {
     // Totals of a single row or column would repeat it.
     const totalRow = !!q.totals && rowDims.length > 0 && rowCount > 0;
     const totalCols = !!q.totals && colDims.length > 0 && cols.reps.length > 0;
-    const groupColumns = cols.reps.length * valueColumns.length;
+    // Columns without any value are left out (e.g. the differences of the base scenario), unless all are empty.
+    const nv = valueColumns.length;
+    const filled = new Uint8Array(cols.reps.length * nv);
+    const fieldFilled = new Uint8Array(nv);
+    valueColumns.forEach((v, vi) => {
+      const special = this.table.columns[v].kind === 'value' ? this.cells.numbers(v).special : undefined;
+      for (let i = 0; i < records.length; i++) {
+        if (!special || special[records[i]] !== Sp.Empty) {
+          filled[cols.groupOf[i] * nv + vi] = 1;
+          fieldFilled[vi] = 1;
+        }
+      }
+    });
+    const anyFilled = fieldFilled.some((f) => f === 1);
+    const colKeys = Int32Array.from({ length: filled.length }, (_, k) => k).filter((k) => !anyFilled || filled[k] === 1);
+    const colOf = new Int32Array(filled.length).fill(-1);
+    colKeys.forEach((k, c) => (colOf[k] = c));
+    // Total columns: of the fields with values that can be totaled with the aggregate.
+    const totalFields = totalCols ? valueColumns.map((_, vi) => vi).filter((vi) => (!anyFilled || fieldFilled[vi]) && !this.notAggregated(valueColumns[vi], aggregate)) : [];
+    const groupColumns = colKeys.length;
     this.lastPivotKey = key;
     this.lastPivot = {
       rowDims,
@@ -1213,9 +1232,12 @@ export class TableView {
       records,
       colGroupOf: cols.groupOf,
       totalRow,
-      totalCols,
+      totalCols: totalFields.length > 0,
+      colKeys,
+      colOf,
+      totalFields,
       groupColumns,
-      columnCount: groupColumns + (totalCols ? valueColumns.length : 0),
+      columnCount: groupColumns + totalFields.length,
       rowCount: rowCount + (totalRow ? 1 : 0),
       filteredCount: records.length,
     };
@@ -1252,9 +1274,9 @@ export class TableView {
     if (r >= realRows) {
       const { start, records } = this.columnGroups(p);
       return (c) => {
-        if (c >= p.groupColumns) return this.combine(p, p.records, p.valueColumns[c - p.groupColumns]);
-        const g = Math.floor(c / nv);
-        return this.combine(p, records.subarray(start[g], start[g + 1]), p.valueColumns[c % nv]);
+        if (c >= p.groupColumns) return this.combine(p, p.records, this.pivotValueColumn(p, c));
+        const g = Math.floor(p.colKeys[c] / nv);
+        return this.combine(p, records.subarray(start[g], start[g + 1]), this.pivotValueColumn(p, c));
       };
     }
     const from = p.rowStart[r];
@@ -1271,8 +1293,8 @@ export class TableView {
       }
     }
     return (c) => {
-      if (c >= p.groupColumns) return this.combine(p, p.rowRecords.subarray(from, to), p.valueColumns[c - p.groupColumns]);
-      return this.combine(p, groups.get(Math.floor(c / nv)), p.valueColumns[c % nv]);
+      if (c >= p.groupColumns) return this.combine(p, p.rowRecords.subarray(from, to), this.pivotValueColumn(p, c));
+      return this.combine(p, groups.get(Math.floor(p.colKeys[c] / nv)), this.pivotValueColumn(p, c));
     };
   }
 
@@ -1283,7 +1305,7 @@ export class TableView {
   private combine(p: PivotData, records: number | ArrayLike<number> | undefined, column: number): PivotCell {
     if (records === undefined) return '';
     if (typeof records === 'number') return records;
-    if (!records.length) return '';
+    if (!records.length || this.notAggregated(column, p.aggregate)) return '';
     if (records.length === 1 && p.aggregate !== 'count') return records[0];
     return this.aggregateOf(records, column, p.aggregate);
   }
@@ -1294,8 +1316,7 @@ export class TableView {
    * or UNDF; texts (set element texts) are counted.
    */
   private aggregateOf(records: ArrayLike<number>, column: number, aggregate: Aggregate): string {
-    // A sum of relative differences (percentages) means nothing.
-    if (aggregate === 'sum' && this.table.columns[column].relative) return '';
+    if (this.notAggregated(column, aggregate)) return '';
     if (aggregate === 'count' || this.table.columns[column].kind !== 'value') {
       if (this.table.columns[column].kind !== 'value') return String(records.length);
       const { special } = this.cells.numbers(column);
@@ -1357,6 +1378,16 @@ export class TableView {
     return x === 0 && eps ? 'Eps' : String(x);
   }
 
+  /**
+   * Whether a column is left empty in aggregated cells and totals: sums of relative differences
+   * (percentages) and of the bounds and scale of variables and equations mean nothing.
+   */
+  private notAggregated(column: number, aggregate: Aggregate): boolean {
+    const c = this.table.columns[column];
+    if (aggregate !== 'sum' || !c) return false;
+    return !!c.relative || (!!this.table.defaults && !c.side && !c.delta && (c.name === 'Lower' || c.name === 'Upper' || c.name === 'Scale'));
+  }
+
   /** The text of a pivot cell (set elements without text are shown as "Y"). */
   private cellText(cell: PivotCell, column: number): string {
     return typeof cell === 'number' ? this.textOf(column, this.cells.get(cell, column)) : cell;
@@ -1376,16 +1407,16 @@ export class TableView {
     const nv = p.valueColumns.length;
     if (c >= p.groupColumns) {
       const labels = p.colDims.map((_, k) => (k === 0 ? TableView.totalLabel(p.aggregate) : ''));
-      return p.fieldLevel ? [...labels, this.table.columns[p.valueColumns[c - p.groupColumns]].name] : labels;
+      return p.fieldLevel ? [...labels, this.table.columns[this.pivotValueColumn(p, c)].name] : labels;
     }
-    const rec = p.colReps[Math.floor(c / nv)];
+    const rec = p.colReps[Math.floor(p.colKeys[c] / nv)];
     const labels = p.colDims.map((d) => this.cells.get(rec, d));
-    return p.fieldLevel ? [...labels, this.table.columns[p.valueColumns[c % nv]].name] : labels;
+    return p.fieldLevel ? [...labels, this.table.columns[this.pivotValueColumn(p, c)].name] : labels;
   }
 
   /** The value column of a pivot column. */
   private pivotValueColumn(p: PivotData, c: number): number {
-    return c >= p.groupColumns ? p.valueColumns[c - p.groupColumns] : p.valueColumns[c % p.valueColumns.length];
+    return c >= p.groupColumns ? p.valueColumns[p.totalFields[c - p.groupColumns]] : p.valueColumns[p.colKeys[c] % p.valueColumns.length];
   }
 
   pivot(q: PivotQuery): PivotPage {
@@ -1517,9 +1548,9 @@ export class TableView {
         const hit = this.labelHits(d, rx, false);
         const dimsUpTo = p.colDims.slice(0, level + 1).map((x) => this.cells.labels(x).ids);
         for (let c = 0; c < p.groupColumns; c++) {
-          const rec = p.colReps[Math.floor(c / nv)];
+          const rec = p.colReps[Math.floor(p.colKeys[c] / nv)];
           if (c > 0) {
-            const prev = p.colReps[Math.floor((c - 1) / nv)];
+            const prev = p.colReps[Math.floor(p.colKeys[c - 1] / nv)];
             if (dimsUpTo.every((dimIds) => dimIds[rec] === dimIds[prev])) continue;
           }
           if (hit[ids[rec]]) hits.push({ r: level, c, kind: 'col' });
@@ -1540,7 +1571,7 @@ export class TableView {
         // The columns of the row's records (each once), then the total columns.
         const groups = new Set<number>();
         for (let k = p.rowStart[r]; k < p.rowStart[r + 1]; k++) groups.add(p.rowRecordGroup[k]);
-        const candidates = [...groups].flatMap((g) => p.valueColumns.map((_, vi) => g * nv + vi));
+        const candidates = [...groups].flatMap((g) => p.valueColumns.flatMap((_, vi) => (p.colOf[g * nv + vi] >= 0 ? [p.colOf[g * nv + vi]] : [])));
         for (let c = p.groupColumns; c < p.columnCount; c++) candidates.push(c);
         for (const c of candidates) {
           const v = this.pivotValueColumn(p, c);
@@ -1881,7 +1912,13 @@ interface PivotData {
   /** Whether the last row is a total row and the last columns (one per value column) are totals. */
   totalRow: boolean;
   totalCols: boolean;
-  /** Number of pivot columns of the column groups: column groups times shown value columns. */
+  /** The pivot columns of the column groups (those with values): column group × value columns + value column. */
+  colKeys: Int32Array;
+  /** The pivot column of a column group × value columns + value column (-1: left out). */
+  colOf: Int32Array;
+  /** The value columns (indexes into valueColumns) of the total columns. */
+  totalFields: number[];
+  /** Number of pivot columns of the column groups. */
   groupColumns: number;
   /** Number of pivot columns, including total columns. */
   columnCount: number;

@@ -21,7 +21,8 @@ no GAMS installation is needed. See the [changelog](CHANGELOG.md) for what is ne
 - **List and table views.** The table view arranges dimensions as rows and columns: drag them between the two, or
   swap them with ⇄. Variables and equations show level, marginal, bounds and scale.
 - **Aggregation and totals.** Drag dimensions of the table view to *Aggregated* to combine their records with sum,
-  mean, min, max or count, and add a total row and total columns with *Totals*.
+  mean, min, max or count, and add a total row and total columns with *Totals*. Columns without any value are left
+  out of the table view.
 - **Built for large symbols.** Records load while you scroll, so symbols with millions of records stay responsive.
 - **Filters and search.** Filter labels from a checklist and numbers by range and special value. Search with
   wildcards, exact match or regular expressions, then jump between matches or show only matching rows.
@@ -172,8 +173,8 @@ the table view, a sort by Δ and a chart then take 0.1–1.6 s.
 - gdxdump runs on a regular file system: files of other file systems (such as Git revisions) are viewed through a
   temporary copy; comparisons, GAMS Connect instructions and Copy as Code need files on disk. vscode.dev is not
   supported.
-- Sums of relative differences (Δ%) are left empty in aggregated cells and totals; mean, min, max and count are
-  shown.
+- Sums of relative differences (Δ%) and of the bounds and scale of variables and equations are left empty in
+  aggregated cells and totals; mean, min, max and count are shown.
 - With the `gamspy` backend, file names must end in lower-case `.gdx`.
 - Copying is limited to 5 million cells, and the Excel export to Excel's sheet size (1,048,576 rows, 16,384
   columns). Filter larger symbols first.

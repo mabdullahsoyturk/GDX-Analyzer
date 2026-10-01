@@ -137,6 +137,9 @@ export function symbolCode(req: CodeRequest): string {
       body.push(`table = df[${valuesArg}].agg(${py(fn)})`);
     }
     if (aggregated) notes.push('pandas skips NA and UNDF when aggregating (the viewer shows them as the result).');
+    if ((aggregated || state?.totals) && aggregate === 'sum' && values.some((v) => v === 'lower' || v === 'upper' || v === 'scale')) {
+      notes.push('pandas also sums the bounds and scale (the viewer leaves them empty).');
+    }
     result = 'table';
   }
 

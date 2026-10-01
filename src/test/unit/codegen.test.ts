@@ -62,6 +62,8 @@ describe('copy as code', () => {
     const code = symbolCode({ language: 'gamspy', file: 'out.gdx', symbol, view, state });
     assert.match(code, /table = df\.pivot_table\(index=\["i"\], values="level", aggfunc="max", observed=True, margins=True, margins_name="Max"\)\n\n# Note: pandas skips NA/);
     assert.match(code, /print\(table\)\n$/);
+    const sums = symbolCode({ language: 'transfer', file: 'out.gdx', symbol, view, state: { view: 'table', rowDims: [0], colDims: [1], totals: true } });
+    assert.match(sums, /# Note: pandas also sums the bounds and scale \(the viewer leaves them empty\)\./);
   });
 });
 

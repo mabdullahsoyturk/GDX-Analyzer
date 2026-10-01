@@ -95,6 +95,30 @@ describe('scenario comparison', () => {
     ]);
   });
 
+  it('leaves the empty differences of the base out of the table view', () => {
+    const scenarios = [
+      { name: 'base', data: par([['a', '1'], ['b', '2']]) },
+      { name: 'high', data: par([['a', '3'], ['b', '2']]) },
+    ];
+    const view = new TableView(scenarioTable(scenarios, 0));
+    const q = { pageSize: 10, colPageSize: 10 };
+    const p = view.pivot(q);
+    assert.deepEqual(p.headers, [
+      ['base', 'Value'],
+      ['high', 'Value'],
+      ['high', 'Δ Value'],
+      ['high', 'Δ% Value'],
+    ]);
+    assert.deepEqual(p.rows.map((r) => [...r.labels, ...r.cells]), [
+      ['a', '1', '3', '2', '200'],
+      ['b', '2', '2', '0', '0'],
+    ]);
+    // Copying, searching and the selection use the same columns.
+    assert.equal(view.copyPivot({}, { all: true }, { separator: '\t', labels: true }).text.split(/\r?\n/)[2], 'a\t1\t3\t2\t200');
+    assert.deepEqual(view.findPivot({}, { text: '200', exact: true }).hits, [{ r: 0, c: 3 }]);
+    assert.equal(view.selectionStatsPivot({}, { rows: [0, 1], cols: [2, 2] }).sum, 2);
+  });
+
   it('compares any scenario as the base and handles files without the symbol', () => {
     const scenarios = [{ name: 'a', data: par([['x', '1']]) }, { name: 'b' }, { name: 'c', data: par([['x', '4']]) }];
     const view = new TableView(scenarioTable(scenarios, 2));
@@ -127,8 +151,11 @@ describe('scenario comparison', () => {
       scenarioTable([{ name: 'base', data: data(columns, 1, [['p', '0', '2', '0', '+Inf', '1'], ['q', '0', '4', '0', '+Inf', '1']]) }, { name: 'none', data: data(columns, 1, []) }], 0, { type: 'Var', subtype: 'positive' }),
     );
     const marginalPercent = { rowDims: [], colDims: [1], aggDims: [0], hidden: [2, 3, 4, 5, 6, 8, 9, 10], pageSize: 10, colPageSize: 10 };
-    assert.deepEqual(two.pivot({ ...marginalPercent, aggregate: 'sum' }).rows[0].cells, ['', '']);
-    assert.deepEqual(two.pivot({ ...marginalPercent, aggregate: 'min' }).rows[0].cells, ['', '-100']);
+    // (The base's Δ% column has no values: it is left out of the table view.)
+    const sum = two.pivot({ ...marginalPercent, aggregate: 'sum' });
+    assert.deepEqual(sum.headers, [['none', 'Δ% Marginal']]);
+    assert.deepEqual(sum.rows[0].cells, ['']);
+    assert.deepEqual(two.pivot({ ...marginalPercent, aggregate: 'min' }).rows[0].cells, ['-100']);
   });
 
   it('keeps set element texts and rejects symbols that differ between the files', () => {

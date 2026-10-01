@@ -14,7 +14,8 @@
   at their lower or upper bound, outside their bounds (infeasible), or not at their defaults, with the number of
   records of each.
 - **Aggregation and totals in the table view:** drag dimensions to *Aggregated* to combine their records with sum,
-  mean, min, max or count, and add a total row and total columns.
+  mean, min, max or count, and add a total row and total columns. Sums of bounds, scales and Δ% are left empty, and
+  columns without any value (such as the differences of the base scenario) are left out.
 - **Relative differences in comparisons:** a Δ% column (in percent of file 1) next to each Δ column, also in charts.
 - **Sorting by magnitude:** a third click on the header of a number column sorts by absolute value, largest first,
   e.g. to find the largest changes.
