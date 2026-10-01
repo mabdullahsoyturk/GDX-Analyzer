@@ -102,6 +102,16 @@
         "category": "GDX"
       },
       {
+        "command": "gdxAnalyzer.compareScenarios",
+        "title": "Compare Scenarios…",
+        "category": "GDX"
+      },
+      {
+        "command": "gdxAnalyzer.compareWithRevision",
+        "title": "Compare with Git Revision… (gdxdiff)",
+        "category": "GDX"
+      },
+      {
         "command": "gdxAnalyzer.exportExcel",
         "title": "Export to Excel…",
         "category": "GDX"
@@ -173,6 +183,16 @@
           "command": "gdxAnalyzer.compare",
           "when": "resourceExtname == .gdx && !explorerResourceIsFolder && listMultiSelection",
           "group": "3_compare@12"
+        },
+        {
+          "command": "gdxAnalyzer.compareScenarios",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
+          "group": "3_compare@13"
+        },
+        {
+          "command": "gdxAnalyzer.compareWithRevision",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder && !listMultiSelection && gitOpenRepositoryCount != 0",
+          "group": "3_compare@14"
         }
       ],
       "editor/context": [
@@ -192,6 +212,16 @@
           "command": "gdxAnalyzer.compare",
           "when": "activeCustomEditorId == gdxAnalyzer.viewer",
           "group": "navigation@2"
+        },
+        {
+          "command": "gdxAnalyzer.compareScenarios",
+          "when": "activeCustomEditorId == gdxAnalyzer.viewer",
+          "group": "1_gdx@1"
+        },
+        {
+          "command": "gdxAnalyzer.compareWithRevision",
+          "when": "activeCustomEditorId == gdxAnalyzer.viewer && gitOpenRepositoryCount != 0",
+          "group": "1_gdx@2"
         }
       ],
       "commandPalette": [
@@ -206,6 +236,10 @@
         {
           "command": "gdxAnalyzer.showInViewer",
           "when": "false"
+        },
+        {
+          "command": "gdxAnalyzer.compareWithRevision",
+          "when": "gitOpenRepositoryCount != 0"
         },
         {
           "command": "gdxAnalyzer.showSymbol",

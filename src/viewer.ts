@@ -363,29 +363,44 @@ export class GdxViewerProvider implements vscode.CustomReadonlyEditorProvider<Gd
     private readonly extensionUri: vscode.Uri,
     private readonly service: GdxService,
     readonly states: ViewStateStore,
+    /** Where files of other file systems (e.g. git: in diff editors) are copied to, to be read by gdxdump. */
+    private readonly storage: vscode.Uri,
   ) {}
 
   openCustomDocument(uri: vscode.Uri): GdxDocument {
     return new GdxDocument(uri);
   }
 
-  resolveCustomEditor(document: GdxDocument, panel: vscode.WebviewPanel): void {
+  async resolveCustomEditor(document: GdxDocument, panel: vscode.WebviewPanel): Promise<void> {
     panel.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')],
     };
-    if (document.uri.scheme !== 'file') {
-      panel.webview.html = `<body><p>GDX files can only be viewed from the local file system (got ${document.uri.scheme}:).</p></body>`;
-      return;
+    let uri = document.uri;
+    let copy: string | undefined;
+    if (uri.scheme !== 'file') {
+      // gdxdump reads files from disk: view a copy (e.g. of a Git revision in a diff editor).
+      try {
+        copy = path.join(this.storage.fsPath, 'copies', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        const file = path.join(copy, path.posix.basename(uri.path) || 'file.gdx');
+        await fs.promises.mkdir(copy, { recursive: true });
+        await fs.promises.writeFile(file, await vscode.workspace.fs.readFile(uri));
+        uri = vscode.Uri.file(file);
+      } catch (err) {
+        const text = `Reading ${document.uri.toString(true)} failed: ${errorMessage(err)}`.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
+        panel.webview.html = `<body><p>${text}</p></body>`;
+        return;
+      }
     }
-    const session = new ViewerSession(this.service, document.uri, panel, this.states);
+    const session = new ViewerSession(this.service, uri, panel, this.states);
     const entry = { session, panel };
     this.sessions.add(entry);
     panel.onDidDispose(() => {
       session.dispose();
       this.sessions.delete(entry);
+      if (copy) fs.promises.rm(copy, { recursive: true, force: true }).catch(() => {});
     });
-    panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'viewer.js', path.basename(document.uri.fsPath));
+    panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'viewer.js', path.basename(uri.fsPath));
   }
 
   /** The session of the active viewer tab, if any. */

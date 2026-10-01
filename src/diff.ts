@@ -44,9 +44,9 @@ export function diffOptionsFromSettings(): DiffOptions {
   };
 }
 
-/** Removes difference files of earlier sessions. */
-export async function cleanupDiffStorage(storage: vscode.Uri) {
-  const dir = path.join(storage.fsPath, 'diffs');
+/** Removes the files of earlier sessions in a directory of the storage (difference files, copies of files). */
+export async function cleanupDiffStorage(storage: vscode.Uri, sub = 'diffs') {
+  const dir = path.join(storage.fsPath, sub);
   const cutoff = Date.now() - 24 * 3600 * 1000;
   try {
     for (const name of await fs.promises.readdir(dir)) {
@@ -77,7 +77,11 @@ export class DiffPanel implements vscode.Disposable {
   private abort?: AbortController;
   private readonly selection: SelectionTracker;
 
-  static show(extensionUri: vscode.Uri, storage: vscode.Uri, service: GdxService, file1: string, file2: string) {
+  /**
+   * Shows the comparison of two files (reusing an open one). `labels`: how to show files
+   * by path, e.g. a Git revision written to a temporary file.
+   */
+  static show(extensionUri: vscode.Uri, storage: vscode.Uri, service: GdxService, file1: string, file2: string, labels?: Record<string, string>) {
     for (const p of DiffPanel.panels) {
       if (p.file1 === file1 && p.file2 === file2) {
         p.panel.reveal();
@@ -85,7 +89,7 @@ export class DiffPanel implements vscode.Disposable {
         return;
       }
     }
-    DiffPanel.panels.add(new DiffPanel(extensionUri, storage, service, file1, file2));
+    DiffPanel.panels.add(new DiffPanel(extensionUri, storage, service, file1, file2, labels ?? {}));
   }
 
   private constructor(
@@ -94,6 +98,7 @@ export class DiffPanel implements vscode.Disposable {
     private readonly service: GdxService,
     private file1: string,
     private file2: string,
+    private readonly labels: Record<string, string>,
   ) {
     this.workDir = path.join(storage.fsPath, 'diffs', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     this.diffFile = path.join(this.workDir, 'diff.gdx');
@@ -129,8 +134,13 @@ export class DiffPanel implements vscode.Disposable {
     fs.promises.rm(this.workDir, { recursive: true, force: true }).catch(() => {});
   }
 
+  /** How a compared file is shown: its path, or its label. */
+  private display(file: string): string {
+    return this.labels[file] ?? file;
+  }
+
   private title() {
-    return `${path.basename(this.file1)} ↔ ${path.basename(this.file2)}`;
+    return `${path.basename(this.display(this.file1))} ↔ ${path.basename(this.display(this.file2))}`;
   }
 
   private post(message: unknown) {
@@ -145,7 +155,7 @@ export class DiffPanel implements vscode.Disposable {
     this.abort?.abort();
     const abort = (this.abort = new AbortController());
     const options = this.options ?? diffOptionsFromSettings();
-    this.post({ type: 'running', file1: this.file1, file2: this.file2, options });
+    this.post({ type: 'running', file1: this.display(this.file1), file2: this.display(this.file2), options });
     try {
       const tools = this.service.tools();
       await fs.promises.mkdir(this.workDir, { recursive: true });
@@ -171,8 +181,8 @@ export class DiffPanel implements vscode.Disposable {
       this.post({
         type: 'result',
         protocol: PROTOCOL,
-        file1: this.file1,
-        file2: this.file2,
+        file1: this.display(this.file1),
+        file2: this.display(this.file2),
         tools: describeTools(tools.tools),
         identical: summary.identical || result.exitCode === 0,
         entries: this.entries(summary),
@@ -325,7 +335,7 @@ export class DiffPanel implements vscode.Disposable {
               'vscode.diff',
               left,
               right,
-              `${what}${path.basename(this.file1)} ↔ ${path.basename(this.file2)} (gdxdump)`,
+              `${what}${this.title()} (gdxdump)`,
             );
           }
         }

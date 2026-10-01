@@ -53,6 +53,20 @@ column by magnitude to see the largest changes first. Chart the differences, ope
 or save the difference file. All gdxdiff options (tolerances, fields, symbols to compare or skip, and more) can be
 set per comparison.
 
+### Scenarios
+
+Compare one symbol across any number of GDX files, e.g. the results of several scenario runs: select the files in
+the Explorer and choose **Compare Scenarios…** (or **Compare GDX Files** with more than two). The table view shows
+the scenarios side by side with the difference (Δ) and relative difference (Δ%) from a base scenario you choose;
+records missing in a scenario count as 0. Charts show a series per scenario, and filters, the solution status,
+aggregation and totals work as in the viewer. The comparison is read again when a file changes.
+
+### Git
+
+**Compare with Git Revision…** (in the Explorer and the viewer) compares a GDX file with its last commit, its staged
+version or any commit of its history using gdxdiff. Clicking a changed GDX file in Source Control shows both versions
+side by side in the viewer.
+
 ### Links from GAMS and Python source
 
 GDX file names in `.gms` and Python files are links (Ctrl+click) that open the file in the viewer:
@@ -97,7 +111,9 @@ menu and the viewer.
 | Command | Description |
 | --- | --- |
 | Open in GDX Analyzer | Open a GDX file in the viewer |
-| Compare GDX Files (gdxdiff) | Compare two GDX files |
+| Compare GDX Files (gdxdiff) | Compare two GDX files (more than two: as scenarios) |
+| Compare Scenarios… | Compare a symbol across several GDX files |
+| Compare with Git Revision… (gdxdiff) | Compare a GDX file with a version of it in Git |
 | Export to Excel… | Export symbols to an Excel workbook |
 | Export Symbol to CSV | Save the records of a symbol as CSV |
 | Dump to Text / Dump Symbol to Text | Open the gdxdump output of a file or symbol |
@@ -145,7 +161,8 @@ Comparing two files with 2 million differing records takes about 3 seconds.
 
 ## Limitations
 
-- GDX files must be on a regular file system; virtual file systems (such as vscode.dev's) are not supported.
+- gdxdump runs on a regular file system: files of other file systems (such as Git revisions) are viewed through a
+  temporary copy, and comparisons need files on disk. vscode.dev is not supported.
 - With the `gamspy` backend, file names must end in lower-case `.gdx`.
 - Copying is limited to 5 million cells, and the Excel export to Excel's sheet size (1,048,576 rows, 16,384
   columns). Filter larger symbols first.

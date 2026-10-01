@@ -93,6 +93,49 @@ const tests: [string, () => Promise<void>][] = [
     },
   ],
   [
+    'compares a GDX file with its Git revision and views Git revisions',
+    async () => {
+      // The fixtures are committed in the repository of the extension, a parent of the workspace folder
+      // (which VS Code only opens when asked).
+      const git = vscode.extensions.getExtension<any>('vscode.git');
+      const api = (git!.isActive ? git!.exports : await git!.activate()).getAPI(1);
+      await api.openRepository(vscode.Uri.file(path.resolve(fixtures, '../..')));
+      await waitFor('Git repository', () => api.getRepository(t1) ?? undefined);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand('gdxAnalyzer.compareWithRevision', t1, 'HEAD');
+      const tab = await waitFor('comparison with HEAD', () => {
+        const t = vscode.window.tabGroups.activeTabGroup.activeTab;
+        return t?.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith('gdxAnalyzer.diff') ? t : undefined;
+      });
+      assert.equal(tab.label, 'transport1.gdx @ HEAD ↔ transport1.gdx (working tree)');
+      // A git: URI (as in the diff editor of Source Control) opens in the viewer through a copy.
+      await vscode.commands.executeCommand('vscode.openWith', api.toGitUri(t1, 'HEAD'), 'gdxAnalyzer.viewer');
+      const viewer = await waitFor('viewer of the Git revision', () => {
+        const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+        return input instanceof vscode.TabInputCustom && input.uri.scheme === 'git' ? input : undefined;
+      });
+      assert.equal(viewer.viewType, 'gdxAnalyzer.viewer');
+    },
+  ],
+  [
+    'compares scenarios, also when comparing more than two files',
+    async () => {
+      const scenarioTab = (what: string) =>
+        waitFor(what, () => {
+          const t = vscode.window.tabGroups.activeTabGroup.activeTab;
+          return t?.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith('gdxAnalyzer.scenarios') ? t : undefined;
+        });
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand('gdxAnalyzer.compareScenarios', t1, [t1, t2]);
+      assert.equal((await scenarioTab('scenario panel')).label, 'Scenarios: transport1, transport2');
+      // gdxdiff compares two files: "Compare GDX Files" with three compares them as scenarios.
+      const types = vscode.Uri.file(path.join(fixtures, 'types.gdx'));
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.commands.executeCommand('gdxAnalyzer.compare', t1, [t1, t2, types]);
+      assert.equal((await scenarioTab('scenario panel of three files')).label, 'Scenarios: transport1, transport2, types');
+    },
+  ],
+  [
     'registers the MCP server for AI agents',
     async () => {
       const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-analyzer');

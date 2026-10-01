@@ -59,10 +59,12 @@ The GitLab pipeline (`.gitlab-ci.yml`):
 | `src/table.ts` | Host-side table model: sorting, filters, windows of rows, table view, charts, comparisons |
 | `src/query.ts` | Answers the webviews' queries (search, windows, charts, copying, selection statistics) |
 | `src/format.ts` | Number formats and exact values |
-| `src/viewer.ts`, `src/diff.ts` | The viewer (custom editor) and the comparison panel |
+| `src/viewer.ts`, `src/diff.ts` | The viewer (custom editor; files of other file systems are copied) and the comparison panel |
 | `src/dump.ts` | Read-only `gdxdump:` documents |
 | `src/export.ts`, `src/xlsx.ts` | Excel export (no dependencies) and GAMS Connect instructions |
 | `src/gdxQuery.ts`, `src/mcp.ts`, `src/mcpProvider.ts` | The MCP server for AI agents and its registration |
 | `src/gdxRefs.ts`, `src/links.ts` | GDX file and symbol references in GAMS and Python source, and their links to the viewer |
+| `src/scenario.ts`, `src/scenarios.ts` | The table of a symbol across scenarios, and the scenario comparison panel (`media/scenarios.js`) |
+| `src/gitCompare.ts` | Comparing a GDX file with a Git revision (through the Git extension of VS Code) |
 | `media/` | Webview scripts (`table.js`, `chart.js`, `viewer.js`, `diff.js`) and styles |
 | `scripts/` | Fetching the bundled tools and packaging |

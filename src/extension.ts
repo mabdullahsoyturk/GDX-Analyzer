@@ -8,6 +8,8 @@ import { GdxService, describeTools } from './service';
 import { textDecoder } from './tools';
 import { ViewStateStore } from './viewState';
 import { GdxViewerProvider } from './viewer';
+import { registerGitCompare } from './gitCompare';
+import { ScenarioPanel } from './scenarios';
 import { registerLinks } from './links';
 import { registerMcpServer } from './mcpProvider';
 
@@ -42,13 +44,19 @@ function isKnownEncoding(label: string): boolean {
 export function activate(context: vscode.ExtensionContext) {
   // Platform-specific packages carry gdxdump/gdxdiff in bin/ (see scripts/package.sh).
   const service = new GdxService(path.join(context.extensionPath, 'bin'));
-  const viewer = new GdxViewerProvider(context.extensionUri, service, new ViewStateStore(context.globalState));
+  const viewer = new GdxViewerProvider(context.extensionUri, service, new ViewStateStore(context.globalState), context.globalStorageUri);
   const dumps = new GdxDumpProvider(service);
   let selectedForCompare: vscode.Uri | undefined;
 
-  cleanupDiffStorage(context.globalStorageUri);
+  for (const sub of ['diffs', 'copies', 'revisions']) cleanupDiffStorage(context.globalStorageUri, sub);
   registerMcpServer(context, service);
   registerLinks(context, (uri, symbol) => guarded('Opening the GDX file failed', showInViewer)(uri, symbol), hasSymbol);
+  registerGitCompare(
+    context,
+    () => currentGdx(),
+    (file1, file2, labels) => DiffPanel.show(context.extensionUri, context.globalStorageUri, service, file1, file2, labels),
+    (err) => service.showError('Comparing with the Git revision failed', err),
+  );
 
   /** The GDX file a command applies to: its argument, the active viewer or the active dump document. */
   function currentGdx(arg?: unknown): vscode.Uri | undefined {
@@ -160,6 +168,14 @@ export function activate(context: vscode.ExtensionContext) {
     DiffPanel.show(context.extensionUri, context.globalStorageUri, service, file1.fsPath, file2.fsPath);
   }
 
+  function compareScenarios(uris: vscode.Uri[]) {
+    if (uris.some((u) => u.scheme !== 'file')) {
+      vscode.window.showErrorMessage('Only GDX files on the local file system can be compared.');
+      return;
+    }
+    ScenarioPanel.show(context.extensionUri, service, uris.map((u) => u.fsPath));
+  }
+
   /** Runs a command body and reports failures uniformly. */
   const guarded =
     (name: string, body: (...args: any[]) => unknown) =>
@@ -261,14 +277,36 @@ export function activate(context: vscode.ExtensionContext) {
           return compare(uris[0], uris[1]);
         }
         if (uris.length > 2) {
-          vscode.window.showWarningMessage('Select exactly two GDX files to compare.');
-          return;
+          // gdxdiff compares two files: more are compared as scenarios.
+          return compareScenarios(uris);
         }
         const first = currentGdx(arg) ?? (await pickGdx('First GDX File'));
         const second = first && (await pickGdx(`Compare ${path.basename(first.fsPath)} with…`, first));
         if (first && second) {
           compare(first, second);
         }
+      }),
+    ),
+
+    vscode.commands.registerCommand(
+      'gdxAnalyzer.compareScenarios',
+      guarded('Comparing the scenarios failed', async (arg?: unknown, all?: unknown) => {
+        let uris = Array.isArray(all) ? all.filter((u): u is vscode.Uri => u instanceof vscode.Uri) : [];
+        if (uris.length < 2) {
+          const first = currentGdx(arg);
+          const picked = await vscode.window.showOpenDialog({
+            title: first ? `Compare ${path.basename(first.fsPath)} with Scenarios` : 'Compare Scenarios (two or more GDX files)',
+            canSelectMany: true,
+            filters: GDX_FILTER,
+            defaultUri: first ? vscode.Uri.file(path.dirname(first.fsPath)) : vscode.workspace.workspaceFolders?.[0]?.uri,
+          });
+          uris = [...(first ? [first] : []), ...(picked ?? []).filter((u) => !first || u.fsPath !== first.fsPath)];
+        }
+        if (uris.length < 2) {
+          if (uris.length) vscode.window.showInformationMessage('Select at least two GDX files to compare as scenarios.');
+          return;
+        }
+        compareScenarios(uris);
       }),
     ),
 

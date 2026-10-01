@@ -49,6 +49,10 @@ export interface Table {
   /** With a store: the cells to highlight and the CSS class of a row (like Row.marks and Row.cls). */
   rowMarks?: (row: number) => number[] | undefined;
   rowClass?: (row: number) => string | undefined;
+  /** Key columns (stored as labels) whose labels are in order (e.g. scenarios): not in GDX order. */
+  orderedColumns?: number[];
+  /** What charts show unless chosen otherwise (column indexes; see ChartSpec). */
+  chartDefaults?: { x?: number; series?: number; value?: number };
 }
 
 export type SpecialValue = 'eps' | 'na' | 'pinf' | 'minf' | 'undf';
@@ -478,6 +482,9 @@ export class TableView {
   /** Rank of each label index of a column: GDX order for key columns if known, else order of first appearance. */
   private ranks(column: number): Int32Array {
     const { ids, labels } = this.cells.labels(column);
+    if (this.table.orderedColumns?.includes(column)) {
+      return Int32Array.from(labels, (_, id) => id);
+    }
     const uel = this.uelRank;
     if (uel && this.table.columns[column]?.kind === 'key') {
       let r = this.uelRanks.get(column);
@@ -929,7 +936,8 @@ export class TableView {
     const values = this.table.columns.flatMap((c, i) => (c.kind === 'value' ? [i] : []));
     const spec = q.chart ?? {};
     const type: ChartType = spec.type === 'line' || spec.type === 'heatmap' ? spec.type : 'bar';
-    const x = keys.includes(spec.x as number) ? (spec.x as number) : keys[keys.length - 1];
+    const defaults = this.table.chartDefaults ?? {};
+    const x = keys.includes(spec.x as number) ? (spec.x as number) : keys.includes(defaults.x as number) ? (defaults.x as number) : keys[keys.length - 1];
     const fields = (spec.fields ?? []).filter((f) => values.includes(f));
     let series =
       keys.includes(spec.series as number) && spec.series !== x
@@ -937,11 +945,18 @@ export class TableView {
         : spec.series === -1 || (spec.series === FIELD_SERIES && fields.length && type !== 'heatmap')
           ? (spec.series as number)
           : undefined;
+    if (series === undefined && keys.includes(defaults.series as number) && defaults.series !== x) series = defaults.series;
     if (series === undefined) series = keys.length >= 2 ? keys.find((k) => k !== x)! : -1;
     if (type === 'heatmap' && series < 0 && keys.length >= 2) series = keys.find((k) => k !== x)!;
     const bySeries = series === FIELD_SERIES;
     // Comparisons: the differences by default.
-    const value = values.includes(spec.value as number) ? (spec.value as number) : bySeries ? fields[0] : (values.find((c) => this.table.columns[c].delta) ?? values[0]);
+    const value = values.includes(spec.value as number)
+      ? (spec.value as number)
+      : bySeries
+        ? fields[0]
+        : values.includes(defaults.value as number)
+          ? (defaults.value as number)
+          : (values.find((c) => this.table.columns[c].delta) ?? values[0]);
     const index = this.indexFor(q);
     const base = {
       kind: 'chart' as const,
@@ -1958,7 +1973,7 @@ function relativeDelta(a: string | undefined, b: string | undefined): string {
 }
 
 /** 100 · (b − a) / |a|, as a number and as text (±INF for a = 0 and b ≠ a). */
-function relativeOf(a: number, b: number): { value: number; special: Sp; text: string } {
+export function relativeOf(a: number, b: number): { value: number; special: Sp; text: string } {
   const d = b - a;
   if (a === 0) {
     if (d === 0) return { value: 0, special: Sp.None, text: '0' };
