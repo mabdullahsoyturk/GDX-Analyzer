@@ -21,7 +21,8 @@ describe('copy as code', () => {
   it('names the dimension columns like GAMS Transfer', () => {
     assert.deepEqual(domainLabels(['i', 'j']), ['i', 'j']);
     assert.deepEqual(domainLabels(['*', '*']), ['uni_0', 'uni_1']);
-    assert.deepEqual(domainLabels(['i', 'j', 'i']), ['i_0', 'j', 'i_2']);
+    // As GAMS Transfer names them: all with their position once a name repeats.
+    assert.deepEqual(domainLabels(['i', 'j', 'i']), ['i_0', 'j_1', 'i_2']);
   });
 
   it('reads the symbol with GAMS Transfer or GAMSPy', () => {

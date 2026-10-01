@@ -166,10 +166,17 @@ export function gamsReferences(text: string): GdxReferences {
     files.push({ start: ref.start, end: ref.end, file });
     let stmtEnd = text.indexOf(';', ref.next);
     if (stmtEnd < 0) stmtEnd = text.length;
-    // Symbols in the code lines up to the end of the statement.
-    for (const l of lines) {
-      const from = Math.max(l.start, ref.next);
-      const to = Math.min(l.end, stmtEnd);
+    // Symbols in the code lines of the statement (from the line of the file name: lines are in order).
+    let lo = 0;
+    let hi = lines.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (lines[mid].end <= ref.next) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let k = lo; k < lines.length && lines[k].start < stmtEnd; k++) {
+      const from = Math.max(lines[k].start, ref.next);
+      const to = Math.min(lines[k].end, stmtEnd);
       if (from < to) symbolList(text, from, to, file, symbols);
     }
     EXECUTE.lastIndex = stmtEnd;

@@ -2,6 +2,7 @@
  * Compares a GDX file with one of its versions in Git (the last commit, the staged version
  * or a commit of its history), using the Git extension of VS Code to read that version.
  */
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -91,7 +92,9 @@ async function revisionFile(repo: GitRepository, file: string, revision: Revisio
   } catch (err) {
     throw new Error(`${path.basename(file)} does not exist in ${revision.name === 'staged' ? 'the index' : revision.name}: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const dir = path.join(storage.fsPath, 'revisions', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  // One directory per file and revision, so that comparing again reuses the open comparison.
+  const id = crypto.createHash('sha1').update(`${file}\0${revision.ref}`).digest('hex').slice(0, 16);
+  const dir = path.join(storage.fsPath, 'revisions', id);
   await fs.promises.mkdir(dir, { recursive: true });
   const target = path.join(dir, path.basename(file));
   await fs.promises.writeFile(target, data);

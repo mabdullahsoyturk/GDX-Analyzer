@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ColumnStoreBuilder } from '../../columns';
 import type { SymbolColumns } from '../../parse';
-import { scenarioNames, scenarioTable } from '../../scenario';
+import { baseAfterRemoval, scenarioNames, scenarioTable } from '../../scenario';
 import { TableView } from '../../table';
 
 /** Records in compact columns, like loadSymbolColumns returns them. */
@@ -30,6 +30,13 @@ describe('scenario comparison', () => {
     assert.deepEqual(scenarioNames(['/runs/base.gdx', '/runs/high.gdx']), ['base', 'high']);
     assert.deepEqual(scenarioNames(['/a/out.gdx', '/b/out.gdx', 'C:\\runs\\x.GDX']), ['a/out', 'b/out', 'x']);
     assert.deepEqual(scenarioNames(['/a/out.gdx', '/a/out.gdx']), ['a/out', 'a/out (2)']);
+  });
+
+  it('keeps the base when a file is removed', () => {
+    // Files a, b, c with c as the base: removing a keeps c (now index 1).
+    assert.equal(baseAfterRemoval(2, 0), 1);
+    assert.equal(baseAfterRemoval(0, 2), 0);
+    assert.equal(baseAfterRemoval(1, 1), 0);
   });
 
   it('puts the scenarios in a key column, with Δ and Δ% from the base', () => {
@@ -110,6 +117,18 @@ describe('scenario comparison', () => {
     // At its lower bound in the base only; bounds and scale are default everywhere.
     assert.deepEqual(view.query({ solution: 'atLower', pageSize: 10 }).rows.map((r) => r.cells[1]), ['base']);
     assert.deepEqual(view.squeezableColumns().map((c) => view.table.columns[c].name), ['Lower', 'Upper', 'Scale']);
+    // A record missing in a scenario (an empty row) has the default values.
+    const missing = new TableView(scenarioTable([{ name: 'base', data: data(columns, 1, [['p', '0', '2', '0', '+Inf', '1']]) }, { name: 'none', data: data(columns, 1, []) }], 0, { type: 'Var', subtype: 'positive' }));
+    assert.deepEqual(missing.query({ solution: 'nonDefault', pageSize: 10 }).rows.map((r) => r.cells[1]), ['base']);
+    // (Its level is 0, the default, too.)
+    assert.deepEqual(missing.squeezableColumns().map((c) => missing.table.columns[c].name), ['Level', 'Lower', 'Upper', 'Scale']);
+    // Sums of Δ% (percentages) are left empty; other aggregates are kept (Δ% Marginal only: column 7).
+    const two = new TableView(
+      scenarioTable([{ name: 'base', data: data(columns, 1, [['p', '0', '2', '0', '+Inf', '1'], ['q', '0', '4', '0', '+Inf', '1']]) }, { name: 'none', data: data(columns, 1, []) }], 0, { type: 'Var', subtype: 'positive' }),
+    );
+    const marginalPercent = { rowDims: [], colDims: [1], aggDims: [0], hidden: [2, 3, 4, 5, 6, 8, 9, 10], pageSize: 10, colPageSize: 10 };
+    assert.deepEqual(two.pivot({ ...marginalPercent, aggregate: 'sum' }).rows[0].cells, ['', '']);
+    assert.deepEqual(two.pivot({ ...marginalPercent, aggregate: 'min' }).rows[0].cells, ['', '-100']);
   });
 
   it('keeps set element texts and rejects symbols that differ between the files', () => {

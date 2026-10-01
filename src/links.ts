@@ -122,8 +122,12 @@ async function pickFile(doc: vscode.TextDocument, at: vscode.Position, symbol: s
     vscode.window.showInformationMessage('No GDX file found: the document references none and the workspace has none.');
     return undefined;
   }
-  const checks = await Promise.all(files.slice(0, 20).map((f) => hasSymbol(f, symbol).catch(() => false)));
-  const withSymbol = files.slice(0, 20).filter((_, i) => checks[i]);
+  // A few files at a time: each check runs gdxdump.
+  const checks: boolean[] = [];
+  for (let i = 0; i < files.length; i += 4) {
+    checks.push(...(await Promise.all(files.slice(i, i + 4).map((f) => hasSymbol(f, symbol).catch(() => false)))));
+  }
+  const withSymbol = files.filter((_, i) => checks[i]);
   if (!withSymbol.length) {
     vscode.window.showInformationMessage(
       files.length === 1 ? `${path.basename(files[0])} has no symbol ${symbol}.` : `None of the GDX files of ${where} has a symbol ${symbol}.`,

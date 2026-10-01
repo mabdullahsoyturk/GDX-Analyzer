@@ -1245,7 +1245,8 @@ button.toggle[aria-pressed='true'] svg {
   gap: 4px;
 }
 
-.chart-control select {
+.chart-control select,
+.agg-controls select {
   font: inherit;
   color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
   background: var(--vscode-dropdown-background, var(--vscode-input-background));

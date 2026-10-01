@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { GdxFileInfo } from './gdxFile';
 import { GdxSymbol, parseUelTable } from './parse';
-import { scenarioNames, scenarioTable } from './scenario';
+import { baseAfterRemoval, scenarioNames, scenarioTable } from './scenario';
 import { GdxService, describeTools, errorMessage } from './service';
 import { TableView, cachedView } from './table';
 import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage } from './tableHost';
@@ -238,8 +238,7 @@ export class ScenarioPanel implements vscode.Disposable {
           case 'remove':
             if (this.files.length > 2 && m.index >= 0 && m.index < this.files.length) {
               this.files = this.files.filter((_, i) => i !== m.index);
-              if (this.base >= this.files.length || this.base === m.index) this.base = 0;
-              else if (this.base > m.index) this.base--;
+              this.base = baseAfterRemoval(this.base, m.index);
               return this.load();
             }
             return;

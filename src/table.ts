@@ -667,7 +667,8 @@ export class TableView {
         const x = Number(d);
         const { values, special } = this.cells.numbers(c);
         for (let r = 0; r < n; r++) {
-          if (special[r] !== sp || (sp === Sp.None && values[r] !== x)) {
+          // An empty cell (a record missing in a scenario) has the default value.
+          if (special[r] !== Sp.Empty && (special[r] !== sp || (sp === Sp.None && values[r] !== x))) {
             return [];
           }
         }
@@ -724,7 +725,8 @@ export class TableView {
         const sp = specialCode(d);
         const x = Number(d);
         const { values, special } = this.cells.numbers(c);
-        return [(r: number) => special[r] !== sp || (sp === Sp.None && values[r] !== x)];
+        // An empty cell (e.g. a record missing in a scenario) has the default value.
+        return [(r: number) => special[r] !== Sp.Empty && (special[r] !== sp || (sp === Sp.None && values[r] !== x))];
       });
       return tests.length ? (r) => tests.some((t) => t(r)) : undefined;
     }
@@ -1292,6 +1294,8 @@ export class TableView {
    * or UNDF; texts (set element texts) are counted.
    */
   private aggregateOf(records: ArrayLike<number>, column: number, aggregate: Aggregate): string {
+    // A sum of relative differences (percentages) means nothing.
+    if (aggregate === 'sum' && this.table.columns[column].relative) return '';
     if (aggregate === 'count' || this.table.columns[column].kind !== 'value') {
       if (this.table.columns[column].kind !== 'value') return String(records.length);
       const { special } = this.cells.numbers(column);

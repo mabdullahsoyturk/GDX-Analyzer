@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { DiffPanel, cleanupDiffStorage } from './diff';
 import { DUMP_SCHEME, GdxDumpProvider, dumpUri } from './dump';
-import { GdxSymbol } from './parse';
+import { GdxSymbol, parseSymbols } from './parse';
 import { GdxService, describeTools } from './service';
 import { textDecoder } from './tools';
 import { ViewStateStore } from './viewState';
@@ -149,15 +149,21 @@ export function activate(context: vscode.ExtensionContext) {
     if (!session || !symbol) {
       return;
     }
-    await session.whenLoaded();
+    // A file that cannot be read: the viewer shows why.
+    if (!(await session.whenLoaded())) {
+      return;
+    }
     if (!session.showSymbol(symbol)) {
       vscode.window.showWarningMessage(`${path.basename(uri.fsPath)} has no symbol ${symbol}.`);
     }
   }
 
+  /** Whether a GDX file has a symbol: from its open viewer, else from gdxdump's symbol list (one call). */
   async function hasSymbol(file: string, symbol: string): Promise<boolean> {
     const wanted = symbol.toLowerCase();
-    return (await symbolsOf(vscode.Uri.file(file))).some((s) => s.name.toLowerCase() === wanted);
+    const session = viewer.sessionFor(vscode.Uri.file(file));
+    const symbols = session?.symbols.length ? session.symbols : parseSymbols(await service.tools().dump(file, { symbols: true }));
+    return symbols.some((s) => s.name.toLowerCase() === wanted);
   }
 
   function compare(file1: vscode.Uri, file2: vscode.Uri) {
@@ -322,8 +328,9 @@ export function activate(context: vscode.ExtensionContext) {
           await vscode.commands.executeCommand('vscode.openWith', uri, GdxViewerProvider.viewType);
           session = viewer.sessionFor(uri);
         }
-        await session?.whenLoaded();
-        session?.openExport();
+        if (session && (await session.whenLoaded())) {
+          session.openExport();
+        }
       }),
     ),
 

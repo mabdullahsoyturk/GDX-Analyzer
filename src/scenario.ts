@@ -28,6 +28,11 @@ export const SCENARIO_COLUMN = 'Scenario';
 /** Fields compared with the base scenario. */
 const COMPARED = new Set(['Value', 'Level', 'Marginal']);
 
+/** The index of the base after removing the file at `removed`: the same file, or the first if it was the base. */
+export function baseAfterRemoval(base: number, removed: number): number {
+  return base === removed ? 0 : base > removed ? base - 1 : base;
+}
+
 /** Unique scenario names for files: the file names without .gdx, with the folder where they repeat. */
 export function scenarioNames(files: string[]): string[] {
   const parts = files.map((f) => f.split(/[\\/]/).filter(Boolean));
@@ -87,7 +92,10 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
   const keyIndex = new Map<number | string, number>();
   const keyOf: Int32Array[] = scenarios.map(() => new Int32Array(0));
   /** A scenario and record of each key (for its labels). */
-  const keyRec: [number, number][] = [];
+  const totalRecords = scenarios.reduce((a, s) => a + (s.data?.store.length ?? 0), 0);
+  const keyScenario = new Int32Array(totalRecords);
+  const keyRecord = new Int32Array(totalRecords);
+  let keyCountTotal = 0;
   for (const s of order) {
     const data = scenarios[s].data;
     const ids = globalIds[s];
@@ -100,15 +108,16 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
       }
       let index = keyIndex.get(k);
       if (index === undefined) {
-        index = keyRec.length;
+        index = keyCountTotal++;
         keyIndex.set(k, index);
-        keyRec.push([s, r]);
+        keyScenario[index] = s;
+        keyRecord[index] = r;
       }
       keys[r] = index;
     }
     keyOf[s] = keys;
   }
-  const keyCountTotal = keyRec.length;
+  keyIndex.clear();
   const recOf = scenarios.map((s, i) => {
     const rec = new Int32Array(keyCountTotal).fill(-1);
     const keys = keyOf[i];
@@ -117,33 +126,39 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
   });
 
   // Rows: per key, the scenarios (in their order) that have the record, or whose base has it.
-  const rowKey: number[] = [];
-  const rowScenario: number[] = [];
-  for (let k = 0; k < keyCountTotal; k++) {
-    const inBase = recOf[base][k] >= 0;
+  const hasRow = (k: number, s: number) => recOf[s][k] >= 0 || (s !== base && recOf[base][k] >= 0);
+  let m = 0;
+  for (let k = 0; k < keyCountTotal; k++) for (let s = 0; s < n; s++) if (hasRow(k, s)) m++;
+  const rowKey = new Int32Array(m);
+  const rowScenario = new Int32Array(m);
+  /** The row of the base with the same key (-1: none), to mark the values that differ. */
+  const baseRow = new Int32Array(m).fill(-1);
+  for (let k = 0, i = 0; k < keyCountTotal; k++) {
+    const first = i;
+    let baseAt = -1;
     for (let s = 0; s < n; s++) {
-      if (recOf[s][k] >= 0 || (inBase && s !== base)) {
-        rowKey.push(k);
-        rowScenario.push(s);
-      }
+      if (!hasRow(k, s)) continue;
+      if (s === base) baseAt = i;
+      rowKey[i] = k;
+      rowScenario[i++] = s;
     }
+    if (baseAt >= 0) baseRow.fill(baseAt, first, i);
   }
-  const m = rowKey.length;
 
   const stored: StoredColumn[] = [];
   const columns: Column[] = [];
   keyNames.forEach((name, d) => {
     const ids = new Int32Array(m);
     for (let i = 0; i < m; i++) {
-      const [s, r] = keyRec[rowKey[i]];
-      ids[i] = globalIds[s]![d][r];
+      const k = rowKey[i];
+      ids[i] = globalIds[keyScenario[k]]![d][keyRecord[k]];
     }
     stored.push({ type: 'label', ids, labels: labels[d] });
     columns.push({ name, kind: 'key' });
   });
   const scenarioLabels = new Labels();
   scenarios.forEach((s) => scenarioLabels.intern(s.name));
-  stored.push({ type: 'label', ids: Int32Array.from(rowScenario), labels: scenarioLabels });
+  stored.push({ type: 'label', ids: rowScenario, labels: scenarioLabels });
   columns.push({ name: SCENARIO_COLUMN, kind: 'key' });
 
   /** The record of row i in its scenario and in the base (-1: none). */
@@ -151,8 +166,8 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
   const inBase = (i: number) => recOf[base][rowKey[i]];
   /** Per field: its column in each scenario's store. */
   const fieldCols = fields.map((f) => scenarios.map((s) => (s.data ? s.data.store.columns[s.data.columns.indexOf(f)] : undefined)));
-  /** Per shown field: its position in the table and its columns in the stores, to mark values that differ from the base. */
-  const marked: { pos: number; cols: (StoredColumn | undefined)[] }[] = [];
+  /** The positions of the fields in the table, to mark the values that differ from the base. */
+  const marked: number[] = [];
 
   fields.forEach((name, f) => {
     const cols = fieldCols[f];
@@ -167,7 +182,7 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
         const r = own(i);
         ids[i] = c && r >= 0 ? textLabels.intern(c.labels.list[c.ids[r]]) : empty;
       }
-      marked.push({ pos: columns.length, cols });
+      marked.push(columns.length);
       stored.push({ type: 'label', ids, labels: textLabels });
       columns.push({ name, kind: 'text' });
       return;
@@ -182,7 +197,7 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
         special[i] = c.special[r];
       }
     }
-    marked.push({ pos: columns.length, cols });
+    marked.push(columns.length);
     stored.push({ type: 'number', values, special });
     columns.push({ name, kind: 'value' });
     if (!COMPARED.has(name)) {
@@ -216,12 +231,6 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
 
   const store = new ColumnStore(m, stored);
   const names = columns.map((c) => c.name);
-  /** A cell of a scenario's store as text ('' if there is no record). */
-  const cellOf = (c: StoredColumn | undefined, r: number): string => {
-    if (!c || r < 0) return '';
-    if (c.type === 'label') return c.labels.list[c.ids[r]];
-    return c.special[r] === Sp.None ? String(c.values[r]) : `#${c.special[r]}`;
-  };
   return {
     columns,
     store,
@@ -237,13 +246,24 @@ export function scenarioTable(scenarios: ScenarioData[], base: number, symbol?: 
       series: keyCount ? keyCount : undefined,
       value: columns.findIndex((c) => c.kind === 'value' && !c.delta),
     },
-    // Values of a scenario that differ from the base (or that the base does not have).
-    rowMarks: (i) => {
-      if (rowScenario[i] === base) return [];
-      const r = own(i);
-      const b = inBase(i);
-      return marked.flatMap(({ pos, cols }) => (cellOf(cols[rowScenario[i]], r) !== cellOf(cols[base], b) ? [pos] : []));
-    },
+    ...rowFunctions(stored, marked, rowScenario, baseRow, base),
+  };
+}
+
+/**
+ * The marks (values of a scenario that differ from the base, or that the base does not have)
+ * and the classes of the rows. Created outside scenarioTable, whose closures would keep the
+ * records of the files in memory: these use the table only.
+ */
+function rowFunctions(stored: StoredColumn[], marked: number[], rowScenario: Int32Array, baseRow: Int32Array, base: number): Pick<Table, 'rowMarks' | 'rowClass'> {
+  /** Whether a field of row i differs from the base row b (-1: none, like an empty cell). */
+  const differs = (c: StoredColumn, i: number, b: number): boolean => {
+    if (c.type === 'label') return b < 0 ? c.labels.list[c.ids[i]] !== '' : c.ids[i] !== c.ids[b];
+    const sb = b < 0 ? Sp.Empty : c.special[b];
+    return c.special[i] !== sb || (sb === Sp.None && c.values[i] !== c.values[b]);
+  };
+  return {
+    rowMarks: (i) => (rowScenario[i] === base ? [] : marked.filter((pos) => differs(stored[pos], i, baseRow[i]))),
     rowClass: (i) => (rowScenario[i] === base ? 'scenario-base' : undefined),
   };
 }

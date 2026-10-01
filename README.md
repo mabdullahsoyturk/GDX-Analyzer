@@ -4,9 +4,10 @@ Browse, chart and compare [GAMS](https://www.gams.com) GDX files in Visual Studi
 
 ![The GDX viewer: symbol list and a two-dimensional parameter in the table view](images/viewer.png)
 
-GDX Analyzer opens `.gdx` files in a fast, read-only viewer, compares files with gdxdiff, exports to Excel and
-gives AI agents read-only access to model data and solutions. `gdxdump` and `gdxdiff` are included for
-Windows, macOS and Linux, so no GAMS installation is needed.
+GDX Analyzer opens `.gdx` files in a fast, read-only viewer, compares files with gdxdiff, across scenarios and
+with their Git history, links GAMS and Python code to the data, exports to Excel and Python, and gives AI agents
+read-only access to model data and solutions. `gdxdump` and `gdxdiff` are included for Windows, macOS and Linux, so
+no GAMS installation is needed. See the [changelog](CHANGELOG.md) for what is new.
 
 > GDX Analyzer is an independent project by Muhammet Soyturk. It is not affiliated with or endorsed by GAMS.
 
@@ -32,6 +33,7 @@ Windows, macOS and Linux, so no GAMS installation is needed.
   column sorts by magnitude, largest first.
 - **Selection and copy.** Select cells, rows or columns and press Ctrl+C to paste them into Excel. The status bar
   shows the sum, average and count of the selection.
+- **Files of other file systems,** such as Git revisions, open through a temporary copy.
 - **Remembers your view** of every symbol (filters, sorting, layout, format, column widths) and reloads when the
   file changes, e.g. after a GAMS run.
 
@@ -43,38 +45,40 @@ Show the filtered records of a symbol as **bars**, **lines** or a **heatmap**. P
 series and the field; other dimensions are summed. Colors follow your theme and are colorblind-safe, and a
 heatmap switches to a diverging scale when values have both signs. Save a chart as PNG or SVG, or copy it.
 
-### Comparison
+### Comparing files
 
-![Comparing two GDX files: the values of both files and their difference](images/compare.png)
+![Comparing two GDX files: both values, the difference and the relative difference](images/compare.png)
 
-Compare two files with gdxdiff and review each differing symbol record by record: the values of both files, their
-difference (Δ) and relative difference in percent (Δ%), and records that exist in only one file. Sort a Δ or Δ%
-column by magnitude to see the largest changes first. Chart the differences, open a text diff of the gdxdump output,
-or save the difference file. All gdxdiff options (tolerances, fields, symbols to compare or skip, and more) can be
-set per comparison.
+**Two files.** Compare two files with gdxdiff and review each differing symbol record by record: the values of both
+files, their difference (Δ) and relative difference in percent (Δ%), and records that exist in only one file. Sort a
+Δ or Δ% column by magnitude to see the largest changes first. Chart the differences, open a text diff of the gdxdump
+output, or save the difference file. All gdxdiff options (tolerances, fields, symbols to compare or skip, and more)
+can be set per comparison.
 
-### Scenarios
+![Three scenarios side by side, with the differences from the base](images/scenarios.png)
 
-Compare one symbol across any number of GDX files, e.g. the results of several scenario runs: select the files in
-the Explorer and choose **Compare Scenarios…** (or **Compare GDX Files** with more than two). The table view shows
-the scenarios side by side with the difference (Δ) and relative difference (Δ%) from a base scenario you choose;
-records missing in a scenario count as 0. Charts show a series per scenario, and filters, the solution status,
-aggregation and totals work as in the viewer. The comparison is read again when a file changes.
+**Scenarios.** Compare one symbol across any number of GDX files, e.g. the results of several scenario runs: select
+the files in the Explorer and choose **Compare Scenarios…** (or **Compare GDX Files** with more than two). The table
+view shows the scenarios side by side with the difference (Δ) and relative difference (Δ%) from a base scenario you
+choose; records missing in a scenario count as 0. Charts show a series per scenario, and filters, the solution
+status, aggregation and totals work as in the viewer. The comparison is read again when a file changes.
 
-### Git
+**Git.** **Compare with Git Revision…** (in the Explorer and the viewer) compares a GDX file with its last commit,
+its staged version or any commit of its history using gdxdiff. Clicking a changed GDX file in Source Control shows
+both versions side by side in the viewer.
 
-**Compare with Git Revision…** (in the Explorer and the viewer) compares a GDX file with its last commit, its staged
-version or any commit of its history using gdxdiff. Clicking a changed GDX file in Source Control shows both versions
-side by side in the viewer.
+### GAMS and Python code
 
-### Links from GAMS and Python source
-
-GDX file names in `.gms` and Python files are links (Ctrl+click) that open the file in the viewer:
+**Links.** GDX file names in `.gms` and Python files are links (Ctrl+click) that open the file in the viewer:
 `$gdxIn data`, `execute_unload 'results.gdx', x;`, `gdx=out.gdx` on a `$call` line, or
 `Container(load_from="data.gdx")` in GAMSPy. The symbols read or written by `$load`, `$unLoad`, `execute_load`,
 `execute_unload` and similar statements are links to that symbol in the file. Put the cursor on any symbol name and
 run **GDX: Show Symbol in GDX File** (also in the editor context menu) to open it in a GDX file the document
 references. Relative names are looked up next to the document, then in the workspace folders.
+
+**Copy as Code.** Python code that reads a symbol into a pandas DataFrame with GAMS Transfer or GAMSPy and applies
+the view: filters, solution status, sorting, shown fields and the table view (as `pivot_table`, with aggregation and
+totals). Copy it or open it in a new editor.
 
 ### Export
 
@@ -82,9 +86,6 @@ references. Relative names are looked up next to the document, then in the works
   Optionally apply the filters and choose how special values are written. The same export can be saved as GAMS
   Connect instructions.
 - **CSV** of one symbol, and the **gdxdump output** of a file or symbol as a text document.
-- **Copy as Code:** Python code that reads a symbol into a pandas DataFrame with GAMS Transfer or GAMSPy and applies
-  the view: filters, solution status, sorting, shown fields and the table view (as `pivot_table`, with aggregation
-  and totals). Copy it or open it in a new editor.
 
 ### AI agents (MCP)
 
@@ -105,6 +106,7 @@ available to agent mode in VS Code automatically. For Claude Code, Cursor and ot
 2. Open a `.gdx` file: it opens in the viewer.
 3. To compare two files, select both in the Explorer, right-click and choose **Compare GDX Files (gdxdiff)**.
    You can also use **Select for GDX Compare** and **Compare with Selected GDX**, or **Compare…** in the viewer.
+4. To compare scenarios, select two or more files and choose **Compare Scenarios…**.
 
 ## Commands
 
@@ -117,13 +119,13 @@ menu and the viewer.
 | Compare GDX Files (gdxdiff) | Compare two GDX files (more than two: as scenarios) |
 | Compare Scenarios… | Compare a symbol across several GDX files |
 | Compare with Git Revision… (gdxdiff) | Compare a GDX file with a version of it in Git |
+| Show Symbol in GDX File | Open the symbol under the cursor in a GDX file the GAMS or Python document references |
 | Export to Excel… | Export symbols to an Excel workbook |
 | Export Symbol to CSV | Save the records of a symbol as CSV |
 | Dump to Text / Dump Symbol to Text | Open the gdxdump output of a file or symbol |
 | Select Encoding of Labels… | Read labels and texts in another encoding (e.g. Latin-1) |
 | Reset Viewer State | Forget the saved view of a file |
 | Copy MCP Server Configuration for AI Agents… | Connect external AI agents |
-| Show Symbol in GDX File | Open the symbol under the cursor in a GDX file the GAMS or Python document references |
 | Show Tool Information | Show which gdxdump and gdxdiff are used |
 
 ## Settings
@@ -160,12 +162,17 @@ i7-1260P with a 148 MB GDX file:
 | 1 million variable records | 1.0 s | 58 MB | 0.3 s | 0.04 s | 0.07 s |
 | 10 million records (3 dimensions) | 4.6 s | 250 MB | 5.2 s | 0.2 s | 0.6 s |
 
-Comparing two files with 2 million differing records takes about 3 seconds.
+Comparing two files with 2 million differing records takes about 3 seconds. Comparing 5 scenarios of a symbol with
+1 million records each (5 million rows) takes 3.3 s and 310 MB for a parameter, and 6.7 s and 580 MB for a variable;
+the table view, a sort by Δ and a chart then take 0.1–1.6 s.
 
 ## Limitations
 
 - gdxdump runs on a regular file system: files of other file systems (such as Git revisions) are viewed through a
-  temporary copy, and comparisons need files on disk. vscode.dev is not supported.
+  temporary copy; comparisons, GAMS Connect instructions and Copy as Code need files on disk. vscode.dev is not
+  supported.
+- Sums of relative differences (Δ%) are left empty in aggregated cells and totals; mean, min, max and count are
+  shown.
 - With the `gamspy` backend, file names must end in lower-case `.gdx`.
 - Copying is limited to 5 million cells, and the Excel export to Excel's sheet size (1,048,576 rows, 16,384
   columns). Filter larger symbols first.
