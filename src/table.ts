@@ -20,6 +20,8 @@ export interface Column {
   side?: 1 | 2;
   /** For difference tables: the column holds differences (file 2 − file 1). */
   delta?: boolean;
+  /** For difference tables: the differences are relative, in percent of |file 1|. */
+  relative?: boolean;
 }
 
 export interface Row {
@@ -128,6 +130,8 @@ export interface TableQuery extends RowSelection {
   format?: NumberFormat;
   sortColumn?: number;
   sortDescending?: boolean;
+  /** Sort a value column by magnitude (absolute value; ±INF largest); NA, UNDF and empty cells come last. */
+  sortAbsolute?: boolean;
   /** Indexes of value/text columns that are not shown. */
   hidden?: number[];
   page?: number;
@@ -162,14 +166,25 @@ export interface TablePage extends Paging {
   rows: Row[];
 }
 
+/** How the table view combines the records of a cell (aggregated dimensions) and computes totals. */
+export type Aggregate = 'sum' | 'mean' | 'min' | 'max' | 'count';
+
+export const AGGREGATES: readonly Aggregate[] = ['sum', 'mean', 'min', 'max', 'count'];
+
 export interface PivotQuery extends RowSelection {
   order?: number[];
   squeeze?: boolean;
   format?: NumberFormat;
   hidden?: number[];
-  /** Key columns shown as row headers and as column headers (together: all key columns). */
+  /** Key columns shown as row headers, as column headers and aggregated (together: all key columns). */
   rowDims?: number[];
   colDims?: number[];
+  /** Key columns that are neither rows nor columns: the records of a cell are combined with `aggregate`. */
+  aggDims?: number[];
+  /** How cells of aggregated records and totals are computed (default sum). */
+  aggregate?: Aggregate;
+  /** Add a total row (of each column) and total columns (of each row, per field). */
+  totals?: boolean;
   page?: number;
   /** The first pivot row to return (instead of `page`). */
   offset?: number;
@@ -183,6 +198,12 @@ export interface PivotPage extends Paging {
   allColumns: Column[];
   rowDims: number[];
   colDims: number[];
+  aggDims: number[];
+  aggregate: Aggregate;
+  /** The index of the total row, if there is one (the last row). */
+  totalRow?: number;
+  /** The index of the first total column, if there are any (the last columns). */
+  totalColumns?: number;
   /** Value columns shown in the cells. */
   valueColumns: number[];
   /** Names of the column header levels: the column dimensions, then "Field" if there are several value columns. */
@@ -417,6 +438,9 @@ class Cells {
   }
 }
 
+/** Sort categories by magnitude: numbers and infinities, then NA, Undf, empty, text. */
+const ABS_CATEGORY: Record<number, number> = { [Sp.None]: 0, [Sp.Eps]: 0, [Sp.PInf]: 0, [Sp.MInf]: 0, [Sp.NA]: 1, [Sp.Undf]: 2, [Sp.Empty]: 3, [Sp.Text]: 4 };
+
 /** Sort categories: -Inf, numbers (with Eps as 0), +Inf, NA, Undf, empty, text. */
 const SORT_CATEGORY: Record<number, number> = { [Sp.MInf]: 0, [Sp.None]: 1, [Sp.Eps]: 1, [Sp.PInf]: 2, [Sp.NA]: 3, [Sp.Undf]: 4, [Sp.Empty]: 5, [Sp.Text]: 6 };
 
@@ -561,9 +585,9 @@ export class TableView {
   }
 
   /** Indexes of the rows matching the filters, in display order (cached for paging). */
-  private indexFor(q: RowSelection & { sortColumn?: number; sortDescending?: boolean }): Int32Array {
+  private indexFor(q: RowSelection & { sortColumn?: number; sortDescending?: boolean; sortAbsolute?: boolean }): Int32Array {
     const searching = compileSearch(q.filter) !== undefined;
-    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, q.sortColumn, !!q.sortDescending, searching ? q.format : null]);
+    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, q.sortColumn, !!q.sortDescending, !!q.sortAbsolute, searching ? q.format : null]);
     if (key === this.lastKey) {
       return this.lastIndex;
     }
@@ -584,7 +608,18 @@ export class TableView {
     const col = q.sortColumn;
     if (col !== undefined && col >= 0 && col < this.table.columns.length) {
       const dir = q.sortDescending ? -1 : 1;
-      if (this.table.columns[col].kind === 'value') {
+      if (this.table.columns[col].kind === 'value' && q.sortAbsolute) {
+        // By magnitude: numbers and infinities (EPS as 0), then NA, UNDF, empty cells and texts in either direction.
+        const { values, special } = this.cells.numbers(col);
+        const cat = new Uint8Array(n);
+        const mag = new Float64Array(n);
+        for (let r = 0; r < n; r++) {
+          const sp = special[r];
+          cat[r] = ABS_CATEGORY[sp];
+          mag[r] = sp === Sp.None ? Math.abs(values[r]) : sp === Sp.PInf || sp === Sp.MInf ? Infinity : 0;
+        }
+        index.sort((a, b) => cat[a] - cat[b] || dir * (mag[a] < mag[b] ? -1 : mag[a] > mag[b] ? 1 : 0) || a - b);
+      } else if (this.table.columns[col].kind === 'value') {
         const { values, special } = this.cells.numbers(col);
         const cat = new Uint8Array(n);
         const key = new Float64Array(n);
@@ -1044,14 +1079,14 @@ export class TableView {
   }
 
   /** Validated row/column dimensions: by default the last key column is shown as columns. */
-  pivotDims(rowDims?: number[], colDims?: number[]): { rowDims: number[]; colDims: number[] } {
+  pivotDims(rowDims?: number[], colDims?: number[], aggDims?: number[]): { rowDims: number[]; colDims: number[]; aggDims: number[] } {
     const keys = this.keyColumns;
-    const given = [...(rowDims ?? []), ...(colDims ?? [])];
+    const given = [...(rowDims ?? []), ...(colDims ?? []), ...(aggDims ?? [])];
     const valid = given.length === keys.length && keys.every((k) => given.includes(k));
     if (valid) {
-      return { rowDims: [...(rowDims ?? [])], colDims: [...(colDims ?? [])] };
+      return { rowDims: [...(rowDims ?? [])], colDims: [...(colDims ?? [])], aggDims: [...(aggDims ?? [])] };
     }
-    return { rowDims: keys.slice(0, -1), colDims: keys.slice(-1) };
+    return { rowDims: keys.slice(0, -1), colDims: keys.slice(-1), aggDims: [] };
   }
 
   /**
@@ -1114,9 +1149,10 @@ export class TableView {
   }
 
   private pivotData(q: PivotQuery): PivotData {
-    const { rowDims, colDims } = this.pivotDims(q.rowDims, q.colDims);
+    const { rowDims, colDims, aggDims } = this.pivotDims(q.rowDims, q.colDims, q.aggDims);
+    const aggregate = q.aggregate && AGGREGATES.includes(q.aggregate) ? q.aggregate : 'sum';
     const valueColumns = this.visibleColumns(q.hidden, q.squeeze, q.order).filter((i) => this.isValueColumn(i));
-    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, rowDims, colDims, valueColumns, !!this.uelRank, compileSearch(q.filter) ? q.format : null]);
+    const key = JSON.stringify([q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, rowDims, colDims, aggDims, aggregate, !!q.totals, valueColumns, !!this.uelRank, compileSearch(q.filter) ? q.format : null]);
     if (key === this.lastPivotKey && this.lastPivot) {
       return this.lastPivot;
     }
@@ -1139,10 +1175,16 @@ export class TableView {
     // With several value columns (variables, equations) or no column dimension, the fields form the last level.
     const fieldLevel = this.table.columns.filter((_, i) => this.isValueColumn(i)).length > 1 || colDims.length === 0;
     const levels = [...colDims.map((d) => this.table.columns[d].name), ...(fieldLevel ? ['Field'] : [])];
+    // Totals of a single row or column would repeat it.
+    const totalRow = !!q.totals && rowDims.length > 0 && rowCount > 0;
+    const totalCols = !!q.totals && colDims.length > 0 && cols.reps.length > 0;
+    const groupColumns = cols.reps.length * valueColumns.length;
     this.lastPivotKey = key;
     this.lastPivot = {
       rowDims,
       colDims,
+      aggDims,
+      aggregate,
       valueColumns,
       levels,
       fieldLevel,
@@ -1151,49 +1193,186 @@ export class TableView {
       rowStart,
       rowRecords,
       rowRecordGroup,
-      columnCount: cols.reps.length * valueColumns.length,
+      records,
+      colGroupOf: cols.groupOf,
+      totalRow,
+      totalCols,
+      groupColumns,
+      columnCount: groupColumns + (totalCols ? valueColumns.length : 0),
+      rowCount: rowCount + (totalRow ? 1 : 0),
       filteredCount: records.length,
     };
     return this.lastPivot;
   }
 
-  /** Labels of a pivot row. */
+  /** The name of the aggregate in total labels, e.g. "Sum". */
+  private static totalLabel(a: Aggregate): string {
+    return a.charAt(0).toUpperCase() + a.slice(1);
+  }
+
+  /** The records of each column group (for the total row), computed when first needed. */
+  private columnGroups(p: PivotData): { start: Int32Array; records: Int32Array } {
+    if (!p.colIndex) {
+      const n = p.colReps.length;
+      const start = new Int32Array(n + 1);
+      for (let i = 0; i < p.records.length; i++) start[p.colGroupOf[i] + 1]++;
+      for (let g = 0; g < n; g++) start[g + 1] += start[g];
+      const fill = start.slice(0, n);
+      const records = new Int32Array(p.records.length);
+      for (let i = 0; i < p.records.length; i++) records[fill[p.colGroupOf[i]]++] = p.records[i];
+      p.colIndex = { start, records };
+    }
+    return p.colIndex;
+  }
+
+  /**
+   * The cells of a pivot row (including the total row) by pivot column: a record whose
+   * value is shown as is, or a computed value (aggregates, totals; '' if there is none).
+   */
+  private rowAccessor(p: PivotData, r: number): (c: number) => PivotCell {
+    const nv = p.valueColumns.length;
+    const realRows = p.rowReps.length;
+    if (r >= realRows) {
+      const { start, records } = this.columnGroups(p);
+      return (c) => {
+        if (c >= p.groupColumns) return this.combine(p, p.records, p.valueColumns[c - p.groupColumns]);
+        const g = Math.floor(c / nv);
+        return this.combine(p, records.subarray(start[g], start[g + 1]), p.valueColumns[c % nv]);
+      };
+    }
+    const from = p.rowStart[r];
+    const to = p.rowStart[r + 1];
+    const groups = new Map<number, number | number[]>();
+    for (let k = from; k < to; k++) {
+      const g = p.rowRecordGroup[k];
+      if (!p.aggDims.length) {
+        groups.set(g, p.rowRecords[k]);
+      } else {
+        const list = groups.get(g) as number[] | undefined;
+        if (list) list.push(p.rowRecords[k]);
+        else groups.set(g, [p.rowRecords[k]]);
+      }
+    }
+    return (c) => {
+      if (c >= p.groupColumns) return this.combine(p, p.rowRecords.subarray(from, to), p.valueColumns[c - p.groupColumns]);
+      return this.combine(p, groups.get(Math.floor(c / nv)), p.valueColumns[c % nv]);
+    };
+  }
+
+  /**
+   * A cell: the record of a cell without aggregated dimensions as is; a list of records (of an
+   * aggregated cell or a total) combined with the aggregate, except a single one unless counting.
+   */
+  private combine(p: PivotData, records: number | ArrayLike<number> | undefined, column: number): PivotCell {
+    if (records === undefined) return '';
+    if (typeof records === 'number') return records;
+    if (!records.length) return '';
+    if (records.length === 1 && p.aggregate !== 'count') return records[0];
+    return this.aggregateOf(records, column, p.aggregate);
+  }
+
+  /**
+   * The aggregate of a column over records as a value (exact, like the values of the symbol).
+   * EPS counts as 0 (a result of 0 from EPS values is EPS), NA and UNDF make the result NA
+   * or UNDF; texts (set element texts) are counted.
+   */
+  private aggregateOf(records: ArrayLike<number>, column: number, aggregate: Aggregate): string {
+    if (aggregate === 'count' || this.table.columns[column].kind !== 'value') {
+      if (this.table.columns[column].kind !== 'value') return String(records.length);
+      const { special } = this.cells.numbers(column);
+      let n = 0;
+      for (let i = 0; i < records.length; i++) if (special[records[i]] !== Sp.Empty) n++;
+      return String(n);
+    }
+    const { values, special } = this.cells.numbers(column);
+    let n = 0;
+    // Neumaier's compensated sum: the result is the correctly rounded sum in all but extreme cases.
+    let sum = 0;
+    let compensation = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    let eps = false;
+    let na = false;
+    let undf = false;
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i];
+      let x: number;
+      switch (special[rec]) {
+        case Sp.None:
+          x = values[rec];
+          break;
+        case Sp.Eps:
+          x = 0;
+          eps = true;
+          break;
+        case Sp.PInf:
+          x = Infinity;
+          break;
+        case Sp.MInf:
+          x = -Infinity;
+          break;
+        case Sp.NA:
+          na = true;
+          continue;
+        case Sp.Undf:
+          undf = true;
+          continue;
+        default:
+          continue;
+      }
+      n++;
+      const t = sum + x;
+      if (Number.isFinite(t)) compensation += Math.abs(sum) >= Math.abs(x) ? sum - t + x : x - t + sum;
+      sum = t;
+      if (x < min) min = x;
+      if (x > max) max = x;
+    }
+    if (undf) return 'Undf';
+    if (na) return 'NA';
+    if (!n) return '';
+    const total = Number.isFinite(sum) ? sum + compensation : sum;
+    const x = aggregate === 'sum' ? total : aggregate === 'mean' ? total / n : aggregate === 'min' ? min : max;
+    if (Number.isNaN(x)) return 'Undf';
+    if (x === Infinity) return '+Inf';
+    if (x === -Infinity) return '-Inf';
+    return x === 0 && eps ? 'Eps' : String(x);
+  }
+
+  /** The text of a pivot cell (set elements without text are shown as "Y"). */
+  private cellText(cell: PivotCell, column: number): string {
+    return typeof cell === 'number' ? this.textOf(column, this.cells.get(cell, column)) : cell;
+  }
+
+  /** Labels of a pivot row (the total row: the aggregate's name, e.g. "Sum"). */
   private rowLabels(p: PivotData, r: number): string[] {
+    if (r >= p.rowReps.length) {
+      return p.rowDims.map((_, k) => (k === 0 ? TableView.totalLabel(p.aggregate) : ''));
+    }
     const rec = p.rowReps[r];
     return p.rowDims.map((d) => this.cells.get(rec, d));
   }
 
-  /** Labels of a pivot column at each level. */
+  /** Labels of a pivot column at each level (total columns: the aggregate's name, then the field). */
   private columnLabels(p: PivotData, c: number): string[] {
     const nv = p.valueColumns.length;
+    if (c >= p.groupColumns) {
+      const labels = p.colDims.map((_, k) => (k === 0 ? TableView.totalLabel(p.aggregate) : ''));
+      return p.fieldLevel ? [...labels, this.table.columns[p.valueColumns[c - p.groupColumns]].name] : labels;
+    }
     const rec = p.colReps[Math.floor(c / nv)];
     const labels = p.colDims.map((d) => this.cells.get(rec, d));
     return p.fieldLevel ? [...labels, this.table.columns[p.valueColumns[c % nv]].name] : labels;
   }
 
-  /** The record of each column group in a pivot row. */
-  private rowCellRecords(p: PivotData, r: number): Map<number, number> {
-    const m = new Map<number, number>();
-    for (let k = p.rowStart[r]; k < p.rowStart[r + 1]; k++) m.set(p.rowRecordGroup[k], p.rowRecords[k]);
-    return m;
-  }
-
-  /** The cell of a pivot column in a row ('' if there is no record). */
-  private cell(p: PivotData, records: Map<number, number>, c: number): string {
-    const nv = p.valueColumns.length;
-    const rec = records.get(Math.floor(c / nv));
-    if (rec === undefined) {
-      return '';
-    }
-    const col = p.valueColumns[c % nv];
-    // Like GAMS Studio: a set element without explanatory text is shown as "Y".
-    return this.textOf(col, this.cells.get(rec, col));
+  /** The value column of a pivot column. */
+  private pivotValueColumn(p: PivotData, c: number): number {
+    return c >= p.groupColumns ? p.valueColumns[c - p.groupColumns] : p.valueColumns[c % p.valueColumns.length];
   }
 
   pivot(q: PivotQuery): PivotPage {
     const p = this.pivotData(q);
     const show = this.formatter(q.format);
-    const rowCount = p.rowReps.length;
+    const rowCount = p.rowCount;
     const pageSize = Math.max(1, q.pageSize);
     const pageCount = Math.max(1, Math.ceil(rowCount / pageSize));
     const offset = windowStart(q, pageSize, rowCount);
@@ -1204,13 +1383,13 @@ export class TableView {
     const colOffset = colPage * colPageSize;
     const cols: number[] = [];
     for (let c = colOffset; c < Math.min(p.columnCount, colOffset + colPageSize); c++) cols.push(c);
-    const nv = p.valueColumns.length;
     const rows: PivotPage['rows'] = [];
     for (let r = offset; r < Math.min(rowCount, offset + pageSize); r++) {
-      const records = this.rowCellRecords(p, r);
-      const exact = cols.map((c) => this.cell(p, records, c));
-      // An empty cell is a missing record (cell() already shows set elements without text as Y).
-      const cells = cols.map((c, k) => (exact[k] === '' ? '' : show(p.valueColumns[c % nv], exact[k])));
+      const cell = this.rowAccessor(p, r);
+      // Like GAMS Studio: a set element without explanatory text is shown as "Y".
+      const exact = cols.map((c) => this.cellText(cell(c), this.pivotValueColumn(p, c)));
+      // An empty cell is a missing record.
+      const cells = cols.map((c, k) => (exact[k] === '' ? '' : show(this.pivotValueColumn(p, c), exact[k])));
       const labels = this.rowLabels(p, r);
       rows.push(cells.some((c, k) => c !== exact[k]) ? { labels, cells, exact } : { labels, cells });
     }
@@ -1222,7 +1401,11 @@ export class TableView {
       valueColumns: p.valueColumns,
       levels: p.levels,
       headers: cols.map((c) => this.columnLabels(p, c)),
-      cellKinds: cols.map((c) => this.table.columns[p.valueColumns[c % nv]].kind),
+      cellKinds: cols.map((c) => this.table.columns[this.pivotValueColumn(p, c)].kind),
+      aggDims: p.aggDims,
+      aggregate: p.aggregate,
+      totalRow: p.totalRow ? p.rowReps.length : undefined,
+      totalColumns: p.totalCols ? p.groupColumns : undefined,
       rows,
       offset,
       page,
@@ -1267,7 +1450,7 @@ export class TableView {
     }
     const columnIndex = this.visibleColumns(q.hidden, q.squeeze, q.order);
     const index = this.indexFor(q);
-    const key = JSON.stringify(['list', search, q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, q.sortColumn, !!q.sortDescending, columnIndex, q.format ?? null]);
+    const key = JSON.stringify(['list', search, q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, q.sortColumn, !!q.sortDescending, !!q.sortAbsolute, columnIndex, q.format ?? null]);
     return this.cachedFind(key, () => {
       const show = this.formatter(q.format);
       const numbers = canMatchNumbers(search);
@@ -1304,7 +1487,7 @@ export class TableView {
       return { hits: [], error: rx.error };
     }
     const p = this.pivotData({ ...q, pageSize: 1, colPageSize: 1 });
-    const key = JSON.stringify(['pivot', search, q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, p.rowDims, p.colDims, p.valueColumns, !!this.uelRank, q.format ?? null]);
+    const key = JSON.stringify(['pivot', search, q.filter ?? '', q.columnFilters ?? [], q.solution ?? null, p.rowDims, p.colDims, p.aggDims, p.aggregate, p.totalRow, p.totalCols, p.valueColumns, !!this.uelRank, q.format ?? null]);
     return this.cachedFind(key, () => {
       const show = this.formatter(q.format);
       const hits: Hit[] = [];
@@ -1314,7 +1497,7 @@ export class TableView {
         const { ids } = this.cells.labels(d);
         const hit = this.labelHits(d, rx, false);
         const dimsUpTo = p.colDims.slice(0, level + 1).map((x) => this.cells.labels(x).ids);
-        for (let c = 0; c < p.columnCount; c++) {
+        for (let c = 0; c < p.groupColumns; c++) {
           const rec = p.colReps[Math.floor(c / nv)];
           if (c > 0) {
             const prev = p.colReps[Math.floor((c - 1) / nv)];
@@ -1334,16 +1517,33 @@ export class TableView {
           if (!same && hit[ids[rec]]) hits.push({ r, c: k, kind: 'row' });
         });
         const found: number[] = [];
-        for (let k = p.rowStart[r]; k < p.rowStart[r + 1]; k++) {
-          const record = p.rowRecords[k];
-          const group = p.rowRecordGroup[k];
-          p.valueColumns.forEach((v, vi) => {
-            if (!numbers && this.table.columns[v].kind === 'value') return;
-            const value = this.textOf(v, this.cells.get(record, v));
-            if (value !== '' && rx.test(show(v, value))) found.push(group * nv + vi);
-          });
+        const cell = this.rowAccessor(p, r);
+        // The columns of the row's records (each once), then the total columns.
+        const groups = new Set<number>();
+        for (let k = p.rowStart[r]; k < p.rowStart[r + 1]; k++) groups.add(p.rowRecordGroup[k]);
+        const candidates = [...groups].flatMap((g) => p.valueColumns.map((_, vi) => g * nv + vi));
+        for (let c = p.groupColumns; c < p.columnCount; c++) candidates.push(c);
+        for (const c of candidates) {
+          const v = this.pivotValueColumn(p, c);
+          const value = cell(c);
+          if (!numbers && (this.table.columns[v].kind === 'value' || typeof value === 'string')) continue;
+          const text = this.cellText(value, v);
+          if (text !== '' && rx.test(show(v, text))) found.push(c);
         }
         found.sort((a, b) => a - b).forEach((c) => hits.push({ r, c }));
+      }
+      if (p.totalRow) {
+        // The total row: its label and its cells.
+        const r = p.rowReps.length;
+        if (rx.test(TableView.totalLabel(p.aggregate))) hits.push({ r, c: 0, kind: 'row' });
+        if (numbers) {
+          const cell = this.rowAccessor(p, r);
+          for (let c = 0; c < p.columnCount; c++) {
+            const v = this.pivotValueColumn(p, c);
+            const text = this.cellText(cell(c), v);
+            if (text !== '' && rx.test(show(v, text))) hits.push({ r, c });
+          }
+        }
       }
       return { hits };
     });
@@ -1384,12 +1584,11 @@ export class TableView {
    */
   gridPivot(q: Omit<PivotQuery, 'page' | 'pageSize' | 'colPage' | 'colPageSize'>, sel: CellSelection, labels: boolean, limits?: GridLimits): Grid {
     const p = this.pivotData({ ...q, pageSize: 1, colPageSize: 1 });
-    const [r0, r1] = sel.all ? [0, p.rowReps.length - 1] : clampRange(sel.rows, p.rowReps.length);
+    const [r0, r1] = sel.all ? [0, p.rowCount - 1] : clampRange(sel.rows, p.rowCount);
     const [c0, c1] = sel.all ? [0, p.columnCount - 1] : clampRange(sel.cols, p.columnCount);
     checkLimits(Math.max(0, r1 - r0 + 1) + (labels ? p.levels.length : 0), Math.max(0, c1 - c0 + 1) + (labels ? p.rowDims.length : 0), limits);
     const cols: number[] = [];
     for (let c = c0; c <= c1; c++) cols.push(c);
-    const nv = p.valueColumns.length;
     const rows: GridCell[][] = [];
     if (labels) {
       const headers = cols.map((c) => this.columnLabels(p, c));
@@ -1401,8 +1600,13 @@ export class TableView {
       });
     }
     for (let r = r0; r <= r1; r++) {
-      const records = this.rowCellRecords(p, r);
-      const cells = cols.map((c) => ({ v: this.cell(p, records, c), value: this.table.columns[p.valueColumns[c % nv]].kind === 'value' }));
+      const cell = this.rowAccessor(p, r);
+      const cells = cols.map((c) => {
+        const v = this.pivotValueColumn(p, c);
+        const x = cell(c);
+        // Computed cells (aggregates, totals, counts) are numbers.
+        return { v: this.cellText(x, v), value: this.table.columns[v].kind === 'value' || typeof x === 'string' };
+      });
       rows.push(labels ? [...this.rowLabels(p, r).map((v) => ({ v, header: true })), ...cells] : cells);
     }
     return { rows, headerRows: labels ? p.levels.length : 0, headerCols: labels ? p.rowDims.length : 0, cells: Math.max(0, r1 - r0 + 1) * cols.length };
@@ -1428,19 +1632,20 @@ export class TableView {
   /** Statistics of the numbers among the selected cells of the table view (positions as in gridPivot, without labels). */
   selectionStatsPivot(q: Omit<PivotQuery, 'page' | 'pageSize' | 'colPage' | 'colPageSize'>, sel: CellSelection): SelectionStats {
     const p = this.pivotData({ ...q, pageSize: 1, colPageSize: 1 });
-    const [r0, r1] = sel.all ? [0, p.rowReps.length - 1] : clampRange(sel.rows, p.rowReps.length);
+    const [r0, r1] = sel.all ? [0, p.rowCount - 1] : clampRange(sel.rows, p.rowCount);
     const [c0, c1] = sel.all ? [0, p.columnCount - 1] : clampRange(sel.cols, p.columnCount);
-    const nv = p.valueColumns.length;
-    const numeric = p.valueColumns.map((c) => (this.table.columns[c].kind === 'value' ? this.cells.numbers(c) : undefined));
+    const numeric = new Map(p.valueColumns.map((c) => [c, this.table.columns[c].kind === 'value' ? this.cells.numbers(c) : undefined]));
     const stats = new StatsAccumulator();
     for (let r = r0; r <= r1; r++) {
-      const records = this.rowCellRecords(p, r);
+      const cell = this.rowAccessor(p, r);
       for (let c = c0; c <= c1; c++) {
-        const rec = records.get(Math.floor(c / nv));
-        const n = numeric[c % nv];
-        if (rec === undefined) stats.add(Sp.Empty, 0);
-        else if (n) stats.add(n.special[rec], n.values[rec]);
-        else stats.label(this.textOf(p.valueColumns[c % nv], this.cells.get(rec, p.valueColumns[c % nv])));
+        const v = this.pivotValueColumn(p, c);
+        const x = cell(c);
+        const n = numeric.get(v);
+        if (x === '') stats.add(Sp.Empty, 0);
+        else if (typeof x === 'string') stats.add(specialCode(x), Number(x));
+        else if (n) stats.add(n.special[x], n.values[x]);
+        else stats.label(this.textOf(v, this.cells.get(x, v)));
       }
     }
     return stats.result();
@@ -1630,9 +1835,14 @@ class CopyWriter {
   }
 }
 
+/** A cell of the table view: a record (whose value is shown) or a computed value ('' if there is none). */
+type PivotCell = number | string;
+
 interface PivotData {
   rowDims: number[];
   colDims: number[];
+  aggDims: number[];
+  aggregate: Aggregate;
   valueColumns: number[];
   levels: string[];
   /** True if the last level holds the field names (Level, Marginal, ...). */
@@ -1644,8 +1854,20 @@ interface PivotData {
   rowStart: Int32Array;
   rowRecords: Int32Array;
   rowRecordGroup: Int32Array;
-  /** Number of pivot columns: column groups times shown value columns. */
+  /** The filtered records and their column group (in the same order). */
+  records: Int32Array;
+  colGroupOf: Int32Array;
+  /** The records of each column group (CSR layout), when first needed for the total row. */
+  colIndex?: { start: Int32Array; records: Int32Array };
+  /** Whether the last row is a total row and the last columns (one per value column) are totals. */
+  totalRow: boolean;
+  totalCols: boolean;
+  /** Number of pivot columns of the column groups: column groups times shown value columns. */
+  groupColumns: number;
+  /** Number of pivot columns, including total columns. */
   columnCount: number;
+  /** Number of pivot rows, including the total row. */
+  rowCount: number;
   filteredCount: number;
 }
 
@@ -1726,9 +1948,29 @@ function delta(a: string | undefined, b: string | undefined): string {
   return String(y - x);
 }
 
+/** The difference in percent of |file 1| (±INF if file 1 is 0); '' unless both are numbers. */
+function relativeDelta(a: string | undefined, b: string | undefined): string {
+  const d = delta(a, b);
+  if (d === '') {
+    return '';
+  }
+  return relativeOf(Number(a), Number(b)).text;
+}
+
+/** 100 · (b − a) / |a|, as a number and as text (±INF for a = 0 and b ≠ a). */
+function relativeOf(a: number, b: number): { value: number; special: Sp; text: string } {
+  const d = b - a;
+  if (a === 0) {
+    if (d === 0) return { value: 0, special: Sp.None, text: '0' };
+    return d > 0 ? { value: 0, special: Sp.PInf, text: '+Inf' } : { value: 0, special: Sp.MInf, text: '-Inf' };
+  }
+  const x = (100 * d) / Math.abs(a);
+  return { value: x, special: Sp.None, text: String(x) };
+}
+
 /**
  * Table for one symbol of a gdxdiff result: the keys, the status and, per value
- * column that differs, the values of both files (plus their difference for numbers).
+ * column that differs, the values of both files (plus their difference, absolute and in percent, for numbers).
  */
 export function diffTable(diff: SymbolDiff): Table {
   const shown = diff.valueColumns
@@ -1746,7 +1988,7 @@ export function diffTable(diff: SymbolDiff): Table {
     const kind = name === 'Text' ? 'text' : 'value';
     columns.push({ name: `${name} (file 1)`, kind, side: 1 }, { name: `${name} (file 2)`, kind, side: 2 });
     if (kind === 'value') {
-      columns.push({ name: `Δ ${name}`, kind: 'value', delta: true });
+      columns.push({ name: `Δ ${name}`, kind: 'value', delta: true }, { name: `Δ% ${name}`, kind: 'value', delta: true, relative: true });
     }
   }
   const rows = diff.records.map((r): Row => {
@@ -1760,7 +2002,8 @@ export function diffTable(diff: SymbolDiff): Table {
       }
       cells.push(v1 ?? '', v2 ?? '');
       if (name !== 'Text') {
-        cells.push(r.status === 'changed' ? delta(v1, v2) : '');
+        const changed = r.status === 'changed';
+        cells.push(changed ? delta(v1, v2) : '', changed ? relativeDelta(v1, v2) : '');
       }
     }
     return { cells, marks, cls: `st-${r.status}` };
@@ -1773,7 +2016,7 @@ const STATUS_NAMES = ['changed', 'only1', 'only2'] as const;
 /**
  * Like diffTable, for a symbol of a gdxdiff difference file in compact columns (as
  * streamed from gdxdump): the keys, the status and, per value column that differs, the
- * values of both files (plus their difference for numbers). gdxdiff writes the records
+ * values of both files (plus their difference, absolute and in percent, for numbers). gdxdiff writes the records
  * sorted by their indices with the dif1/dif2/ins1/ins2 label last, so the two rows of a
  * changed record follow each other.
  */
@@ -1862,17 +2105,22 @@ export function diffColumnTable(data: SymbolColumns): Table {
     const v2 = pick(c, row2);
     stored.push(v1, v2);
     if (kind === 'value' && v1.type === 'number' && v2.type === 'number') {
-      columns.push({ name: `Δ ${name}`, kind: 'value', delta: true });
+      columns.push({ name: `Δ ${name}`, kind: 'value', delta: true }, { name: `Δ% ${name}`, kind: 'value', delta: true, relative: true });
       const values = new Float64Array(m);
       const special = new Uint8Array(m).fill(Sp.Empty);
+      const relValues = new Float64Array(m);
+      const relSpecial = new Uint8Array(m).fill(Sp.Empty);
       for (let rec = 0; rec < m; rec++) {
         // Exact; the number format of the view decides how many digits are shown.
         if (status[rec] === 0 && v1.special[rec] === Sp.None && v2.special[rec] === Sp.None && Number.isFinite(v1.values[rec]) && Number.isFinite(v2.values[rec])) {
           values[rec] = v2.values[rec] - v1.values[rec];
           special[rec] = Sp.None;
+          const rel = relativeOf(v1.values[rec], v2.values[rec]);
+          relValues[rec] = rel.value;
+          relSpecial[rec] = rel.special;
         }
       }
-      stored.push({ type: 'number', values, special } as NumberColumn);
+      stored.push({ type: 'number', values, special } as NumberColumn, { type: 'number', values: relValues, special: relSpecial } as NumberColumn);
     }
   }
   return {

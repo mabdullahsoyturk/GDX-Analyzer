@@ -59,6 +59,7 @@ const SOLUTION = {
     '"atLower"/"atUpper": the level is at its finite lower/upper bound; "infeasible": the level is outside its bounds; ' +
     `"nonDefault": a field differs from its default. Bounds are compared with the tolerance ${BOUND_TOLERANCE} · max(1, |bound|).`,
 };
+const BY_MAGNITUDE = { type: 'boolean', description: 'Sort the sortBy column by absolute value (with descending: largest first, e.g. the largest changes); NA, Undf and empty values come last.' };
 const SEARCH = { type: 'string', description: 'Keep only records with a cell containing this text (case-insensitive; * and ? are wildcards).' };
 const LIMIT = { type: 'integer', minimum: 1, maximum: MAX_LIMIT, description: `Records per page (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}).` };
 const PAGE = { type: 'integer', minimum: 0, description: 'Page number, from 0 (default 0).' };
@@ -98,6 +99,7 @@ export const TOOL_SPECS: ToolSpec[] = [
         search: SEARCH,
         sortBy: { type: 'string', description: 'Column to sort by (default: the order of the GDX file).' },
         descending: { type: 'boolean', description: 'Sort in descending order.' },
+        byMagnitude: BY_MAGNITUDE,
         fields: { type: 'array', items: { type: 'string' }, description: 'Value columns to include, e.g. ["Level", "Marginal"] (default: all, see squeezeDefaults).' },
         squeezeDefaults: { type: 'boolean', description: 'Leave out variable/equation fields that have their default value in every record (default true).' },
         limit: LIMIT,
@@ -125,7 +127,8 @@ export const TOOL_SPECS: ToolSpec[] = [
     title: 'Compare GDX files',
     description:
       'Compares two GDX files with gdxdiff. Without a symbol: lists the symbols that differ and how. With a symbol: its differing records as CSV, ' +
-      'with the status (changed, only in file 1, only in file 2), the values of both files and their difference (Δ).',
+      'with the status (changed, only in file 1, only in file 2), the values of both files, their difference (Δ = file 2 − file 1) ' +
+      'and the difference in percent of |file 1| (Δ%; ±Inf if file 1 is 0). Sort by "Δ Level" or "Δ% Level" with byMagnitude and descending for the largest changes first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -138,6 +141,9 @@ export const TOOL_SPECS: ToolSpec[] = [
         ignoreSetText: { type: 'boolean', description: 'Ignore the explanatory texts of set elements.' },
         compareDefaults: { type: 'boolean', description: 'Report default values (e.g. 0 for parameters) found in only one file as differences.' },
         filters: FILTERS,
+        sortBy: { type: 'string', description: 'Column to sort the records of the symbol by, e.g. "Δ Level" (default: the order of the GDX file).' },
+        descending: { type: 'boolean', description: 'Sort in descending order.' },
+        byMagnitude: BY_MAGNITUDE,
         limit: LIMIT,
         page: PAGE,
       },
@@ -413,6 +419,7 @@ export class GdxQueries {
       solution: this.solution(view, args.solution),
       sortColumn: typeof args.sortBy === 'string' ? this.column(view, args.sortBy) : undefined,
       sortDescending: !!args.descending,
+      sortAbsolute: !!args.byMagnitude,
       hidden,
       squeeze,
       page,
@@ -531,7 +538,14 @@ export class GdxQueries {
       return v;
     });
     const { limit, page } = this.paging(args);
-    const result = view.query({ columnFilters: this.filters(view, args.filters), page, pageSize: limit });
+    const result = view.query({
+      columnFilters: this.filters(view, args.filters),
+      sortColumn: typeof args.sortBy === 'string' ? this.column(view, args.sortBy) : undefined,
+      sortDescending: !!args.descending,
+      sortAbsolute: !!args.byMagnitude,
+      page,
+      pageSize: limit,
+    });
     const lines = [
       `${header}`,
       `${original ? this.describe(original) : entry.symbol}: ${entry.status}`,

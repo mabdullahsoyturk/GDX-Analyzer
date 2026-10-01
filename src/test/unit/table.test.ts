@@ -74,7 +74,7 @@ describe('universe', () => {
 });
 
 describe('diffTable', () => {
-  it('shows both values, the delta and highlights changed cells', () => {
+  it('shows both values, the absolute and relative delta and highlights changed cells', () => {
     const diff = pivotDiff({
       columns: ['i', 'Dim2', 'Level', 'Marginal'],
       keyCount: 2,
@@ -88,11 +88,11 @@ describe('diffTable', () => {
     // Marginal never differs between dif1/dif2, so only Level is shown.
     assert.deepEqual(
       t.columns.map((c) => c.name),
-      ['i', 'Status', 'Level (file 1)', 'Level (file 2)', 'Δ Level'],
+      ['i', 'Status', 'Level (file 1)', 'Level (file 2)', 'Δ Level', 'Δ% Level'],
     );
-    assert.deepEqual(t.rows![0].cells, ['seattle', 'changed', '50', '60', '10']);
+    assert.deepEqual(t.rows![0].cells, ['seattle', 'changed', '50', '60', '10', '20']);
     assert.deepEqual(t.rows![0].marks, [2, 3]);
-    assert.deepEqual(t.rows![1].cells, ['topeka', 'only in file 2', '', '5', '']);
+    assert.deepEqual(t.rows![1].cells, ['topeka', 'only in file 2', '', '5', '', '']);
     assert.equal(t.rows![1].cls, 'st-only2');
   });
 });

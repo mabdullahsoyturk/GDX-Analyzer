@@ -6,7 +6,7 @@
 import { NumberFormat, normalizeFormat } from './format';
 import type { GdxSymbol } from './parse';
 import { TextSearch } from './search';
-import { ColumnFilter, SolutionFilter, SpecialValue, TableView, specialOf } from './table';
+import { Aggregate, ColumnFilter, SolutionFilter, SpecialValue, TableView, specialOf } from './table';
 import { MAX_COLS, MAX_ROWS, Sheet, SheetCell, sheetNames } from './xlsx';
 
 /** The per-symbol view state of the webview (see media/table.js). */
@@ -17,11 +17,15 @@ export interface SymbolViewState {
   search?: TextSearch & { filterRows?: boolean };
   sortColumn?: number;
   sortDescending?: boolean;
+  sortAbsolute?: boolean;
   hidden?: number[];
   order?: number[];
   squeeze?: boolean;
   rowDims?: number[];
   colDims?: number[];
+  aggDims?: number[];
+  aggregate?: Aggregate;
+  totals?: boolean;
   format?: Partial<NumberFormat>;
 }
 
@@ -64,11 +68,15 @@ function exportQuery(item: ExportItem, options: ExportOptions, defaults: ExportD
     format: st.format ? normalizeFormat(st.format, defaults.format) : defaults.format,
     sortColumn: st.sortColumn,
     sortDescending: st.sortDescending,
+    sortAbsolute: st.sortAbsolute,
     hidden: options.includeHidden ? [] : (st.hidden ?? []),
     order: st.order,
     squeeze: options.includeHidden ? false : (st.squeeze ?? defaults.squeezeDefaults),
     rowDims: st.rowDims,
     colDims: st.colDims,
+    aggDims: st.aggDims,
+    aggregate: st.aggregate,
+    totals: st.totals,
     pageSize: 1,
   };
 }
@@ -196,9 +204,25 @@ export function connectInstructions(gdxFile: string, xlsxFile: string, items: Ex
     // List view: the key columns in the order shown.
     let order = shownOrder.filter((c) => keys.includes(c)).map((d) => idx[keys.indexOf(d)]);
     let columnDimension = 0;
+    /** The aggregation of the Projection when the table view aggregates dimensions. */
+    let aggregation = '';
     if (pivot) {
-      const dims = item.view.pivotDims(query.rowDims, query.colDims);
-      order = [...dims.rowDims, ...dims.colDims].map((d) => idx[keys.indexOf(d)]);
+      const dims = item.view.pivotDims(query.rowDims, query.colDims, query.aggDims);
+      let rowDims = dims.rowDims;
+      const method = query.aggregate ?? 'sum';
+      if (dims.aggDims.length) {
+        // Connect has no count, and sets can only be aggregated with first/last: keep their records.
+        if (method === 'count' || s.type === 'Set') {
+          notes.push(`the aggregation (${method === 'count' ? 'count' : 'of set elements'}) is not applied: the aggregated dimensions are written as rows`);
+          rowDims = [...rowDims, ...dims.aggDims];
+        } else {
+          aggregation = `\n    aggregationMethod: ${method}`;
+        }
+      }
+      if (query.totals) {
+        notes.push('the totals are not written');
+      }
+      order = [...rowDims, ...dims.colDims].map((d) => idx[keys.indexOf(d)]);
       columnDimension = dims.colDims.length;
     }
     const reordered = order.join(',') !== idx.join(',');
@@ -212,14 +236,14 @@ export function connectInstructions(gdxFile: string, xlsxFile: string, items: Ex
         fields = inOrder.filter(({ c }) => SUFFIX[c.name]);
       }
       const suffix = fields.length === 1 ? SUFFIX[fields[0].c.name] : `[${fields.map((f) => SUFFIX[f.c.name]).join(',')}]`;
-      agents.push(`- Projection:\n    name: ${current}.${suffix}(${idx.join(',')})\n    newName: ${target}(${order.join(',')})`);
+      agents.push(`- Projection:\n    name: ${current}.${suffix}(${idx.join(',')})\n    newName: ${target}${order.length ? `(${order.join(',')})` : ''}${aggregation}`);
       current = target;
       if (fields.length > 1) {
         // The fields are an extra (last) index: columns in the list view, the last column level in the table view.
         columnDimension += 1;
       }
-    } else if (reordered) {
-      agents.push(`- Projection:\n    name: ${current}(${idx.join(',')})\n    newName: ${target}(${order.join(',')})`);
+    } else if (reordered || aggregation) {
+      agents.push(`- Projection:\n    name: ${current}(${idx.join(',')})\n    newName: ${target}${order.length ? `(${order.join(',')})` : ''}${aggregation}`);
       current = target;
     }
     for (const n of notes) {

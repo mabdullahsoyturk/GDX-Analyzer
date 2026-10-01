@@ -4,7 +4,7 @@
  */
 import { NumberFormat, formatNumber, normalizeFormat } from './format';
 import { TextSearch, compileSearch, isSearchError } from './search';
-import { CellSelection, ChartData, ChartSpec, ColumnFilter, CopyResult, Hit, PivotPage, SelectionStats, SolutionFilter, SpecialValue, TablePage, TableView } from './table';
+import { Aggregate, CellSelection, ChartData, ChartSpec, ColumnFilter, CopyResult, Hit, PivotPage, SelectionStats, SolutionFilter, SpecialValue, TablePage, TableView } from './table';
 
 /** Table state sent by the webview with each query. */
 export interface WebviewQuery {
@@ -19,6 +19,8 @@ export interface WebviewQuery {
   solution?: SolutionFilter;
   sortColumn?: number;
   sortDescending?: boolean;
+  /** Sort the number column by magnitude. */
+  sortAbsolute?: boolean;
   hidden?: number[];
   /** Column order of the list view. */
   order?: number[];
@@ -32,6 +34,10 @@ export interface WebviewQuery {
   chart?: ChartSpec;
   rowDims?: number[];
   colDims?: number[];
+  /** Table view: aggregated dimensions, how cells and totals are computed, and whether to show totals. */
+  aggDims?: number[];
+  aggregate?: Aggregate;
+  totals?: boolean;
   colPage?: number;
   /** Number format chosen for this symbol; the default applies if absent. */
   format?: Partial<NumberFormat>;

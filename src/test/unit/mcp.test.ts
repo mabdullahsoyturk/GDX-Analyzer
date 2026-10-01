@@ -85,8 +85,13 @@ describe('GDX queries for agents', { skip: resolved ? false : 'GAMS tools not fo
     assert.match(summary, /5 symbols differ/);
     assert.match(summary, /^extra,Parameter,0,Symbol not found in file 1$/m);
     const x = await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport2.gdx', symbol: 'x' });
-    assert.match(x, /i,j,Status,Level \(file 1\),Level \(file 2\),Δ Level\nseattle,new-york,changed,50,60,10\n/);
+    assert.match(x, /i,j,Status,Level \(file 1\),Level \(file 2\),Δ Level,Δ% Level\nseattle,new-york,changed,50,60,10,20\n/);
     assert.match(await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport2.gdx', symbol: 'b' }), /b does not differ/);
+    // The largest relative change first (+20% beats -3.6%), unlike the signed ascending order.
+    const byMagnitude = await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport2.gdx', symbol: 'x', sortBy: 'Δ% Level', byMagnitude: true, descending: true });
+    assert.match(byMagnitude, /Δ% Level\nseattle,new-york,changed,50,60,10,20\nsan-diego,new-york,changed,275,265,-10,-3\.63/);
+    const ascending = await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport2.gdx', symbol: 'x', sortBy: 'Δ% Level' });
+    assert.match(ascending, /Δ% Level\nsan-diego,new-york/);
     assert.match(await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport1.gdx' }), /no differences/);
   });
 

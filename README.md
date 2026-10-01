@@ -19,6 +19,8 @@ Windows, macOS and Linux, so no GAMS installation is needed.
   unique elements of the file.
 - **List and table views.** The table view arranges dimensions as rows and columns: drag them between the two, or
   swap them with ⇄. Variables and equations show level, marginal, bounds and scale.
+- **Aggregation and totals.** Drag dimensions of the table view to *Aggregated* to combine their records with sum,
+  mean, min, max or count, and add a total row and total columns with *Totals*.
 - **Built for large symbols.** Records load while you scroll, so symbols with millions of records stay responsive.
 - **Filters and search.** Filter labels from a checklist and numbers by range and special value. Search with
   wildcards, exact match or regular expressions, then jump between matches or show only matching rows.
@@ -26,7 +28,8 @@ Windows, macOS and Linux, so no GAMS installation is needed.
   constraints), a level at its lower or upper bound, a level outside its bounds (infeasible), or a field that is not at
   its default. Each choice shows how many records it matches.
 - **Exact numbers.** Values are read exactly. Choose the format per symbol (`g`, `f` or `e`, a precision, or full
-  precision); sorting, filters and copies always use the exact values.
+  precision); sorting, filters and copies always use the exact values. A third click on the header of a number
+  column sorts by magnitude, largest first.
 - **Selection and copy.** Select cells, rows or columns and press Ctrl+C to paste them into Excel. The status bar
   shows the sum, average and count of the selection.
 - **Remembers your view** of every symbol (filters, sorting, layout, format, column widths) and reloads when the
@@ -45,7 +48,8 @@ heatmap switches to a diverging scale when values have both signs. Save a chart 
 ![Comparing two GDX files: the values of both files and their difference](images/compare.png)
 
 Compare two files with gdxdiff and review each differing symbol record by record: the values of both files, their
-difference, and records that exist in only one file. Chart the differences, open a text diff of the gdxdump output,
+difference (Δ) and relative difference in percent (Δ%), and records that exist in only one file. Sort a Δ or Δ%
+column by magnitude to see the largest changes first. Chart the differences, open a text diff of the gdxdump output,
 or save the difference file. All gdxdiff options (tolerances, fields, symbols to compare or skip, and more) can be
 set per comparison.
 
@@ -76,7 +80,7 @@ available to agent mode in VS Code automatically. For Claude Code, Cursor and ot
 | `gdx_list_symbols` | The symbols of a file with type, dimension, domain, records and text |
 | `gdx_read_symbol` | Records as CSV with exact values; filters (including solution status), search, sorting and paging |
 | `gdx_symbol_stats` | Distinct labels per dimension; count, sum, mean, min, max and special values per field, optionally filtered |
-| `gdx_compare` | The differing symbols of two files, or the differing records of one symbol |
+| `gdx_compare` | The differing symbols of two files, or the differing records of one symbol with Δ and Δ%, sortable by magnitude |
 
 ## Getting started
 

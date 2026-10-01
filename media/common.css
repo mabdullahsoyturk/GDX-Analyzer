@@ -765,6 +765,36 @@ button.transpose {
   padding: 1px 8px;
 }
 
+.zone-hint {
+  color: var(--muted);
+  font-size: 0.85em;
+  font-style: italic;
+  padding: 0 4px;
+}
+
+.agg-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Totals of the table view: the total row and the total columns. */
+.gdx-table table.pivot tr.total td,
+.gdx-table table.pivot tr.total th,
+.gdx-table table.pivot td.total,
+.gdx-table table.pivot th.colhead.total {
+  font-weight: 600;
+}
+
+.gdx-table table.pivot tr.total td,
+.gdx-table table.pivot tr.total th {
+  border-top: 2px solid var(--border);
+}
+
+.gdx-table table.pivot td.total {
+  border-left: 2px solid var(--border);
+}
+
 .gdx-table table.pivot th.corner {
   cursor: default;
 }

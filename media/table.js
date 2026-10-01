@@ -549,11 +549,17 @@
     solution: undefined,
     sortColumn: undefined,
     sortDescending: false,
+    /** Sort the number column by magnitude (with sortDescending: largest first). */
+    sortAbsolute: false,
     hidden: [],
     page: 0,
     view: 'list',
     rowDims: undefined,
     colDims: undefined,
+    /** Table view: dimensions combined in the cells, how (AGGREGATES), and whether totals are shown. */
+    aggDims: undefined,
+    aggregate: undefined,
+    totals: false,
     colPage: 0,
     format: undefined,
     /** Column widths set by the user (px), by column key. */
@@ -1138,7 +1144,7 @@
     shapeChanged() {
       const s = this.state;
       const rowSearch = s.search && s.search.filterRows ? s.search : null;
-      const key = JSON.stringify([rowSearch, s.columnFilters, s.solution, s.sortColumn, s.sortDescending, s.hidden, s.view, s.rowDims, s.colDims, s.order]);
+      const key = JSON.stringify([rowSearch, s.columnFilters, s.solution, s.sortColumn, s.sortDescending, s.sortAbsolute, s.hidden, s.view, s.rowDims, s.colDims, s.aggDims, s.aggregate, s.totals, s.order]);
       if (key !== this.shapeKey) {
         this.shapeKey = key;
         return true;
@@ -1579,6 +1585,7 @@
       } else if (p.kind === 'pivot') {
         this.state.rowDims = p.rowDims;
         this.state.colDims = p.colDims;
+        this.state.aggDims = p.aggDims;
         this.state.colPage = p.colPage;
         this.shapeChanged();
         this.renderPivot(p);
@@ -1590,19 +1597,24 @@
       this.paintSearch(p.search);
     }
 
+    /** Cycles the sort of a column: ascending, descending, (numbers) largest magnitude first, none. */
     sortBy(col) {
-      if (this.state.sortColumn === col) {
-        if (this.state.sortDescending) {
-          this.state.sortColumn = undefined;
-          this.state.sortDescending = false;
-        } else {
-          this.state.sortDescending = true;
-        }
+      const s = this.state;
+      const numbers = this.columns[col] && this.columns[col].kind === 'value';
+      if (s.sortColumn !== col) {
+        s.sortColumn = col;
+        s.sortDescending = false;
+        s.sortAbsolute = false;
+      } else if (!s.sortDescending) {
+        s.sortDescending = true;
+      } else if (numbers && !s.sortAbsolute) {
+        s.sortAbsolute = true;
       } else {
-        this.state.sortColumn = col;
-        this.state.sortDescending = false;
+        s.sortColumn = undefined;
+        s.sortDescending = false;
+        s.sortAbsolute = false;
       }
-      this.state.page = 0;
+      s.page = 0;
       this.query();
     }
 
@@ -1624,7 +1636,7 @@
             {
               class: c.kind + (this.filterFor(ci) ? ' filtered' : ''),
               tabindex: 0,
-              title: 'Sort by ' + c.name + '; drag to move the column (or Alt+←/→)',
+              title: 'Sort by ' + c.name + (c.kind === 'value' ? ' (click again: descending, then largest magnitude first)' : '') + '; drag to move the column (or Alt+←/→)',
               'aria-sort': sorted ? (this.state.sortDescending ? 'descending' : 'ascending') : undefined,
               // A click that ends a column resize does not sort.
               onclick: () => Date.now() > this.suppressClickUntil && this.sortBy(ci),
@@ -1645,7 +1657,7 @@
                 }
               },
             },
-            h('span', { class: 'th' }, c.name, keyPos ? h('sup', { class: 'pos', title: 'Index position ' + keyPos }, String(keyPos)) : null, sorted ? h('span', { class: 'arrow' }, this.state.sortDescending ? '▼' : '▲') : null, this.filterButton(ci, c.name)),
+            h('span', { class: 'th' }, c.name, keyPos ? h('sup', { class: 'pos', title: 'Index position ' + keyPos }, String(keyPos)) : null, sorted ? h('span', { class: 'arrow', title: this.state.sortAbsolute ? 'Largest magnitude first' : undefined }, this.state.sortAbsolute ? '▼|x|' : this.state.sortDescending ? '▼' : '▲') : null, this.filterButton(ci, c.name)),
           );
           th.dataset.col = String(ci);
           return this.reorderable(this.sizable(th, 'c' + ci), ci);
@@ -1765,6 +1777,7 @@
         const field = c.name.replace(/ \(file 1\)$/, '');
         const delta = cols[i + 2] && cols[i + 2].delta ? i + 2 : -1;
         if (delta >= 0) options.push([`v:${delta}`, cols[delta].name]);
+        if (delta >= 0 && cols[i + 3] && cols[i + 3].relative) options.push([`v:${i + 3}`, cols[i + 3].name]);
         if (type === 'heatmap') options.push([`v:${i}`, c.name], [`v:${i + 1}`, cols[i + 1].name]);
         else options.push([`f:${i},${i + 1}`, `${field}: file 1 and file 2`]);
       });
@@ -1793,7 +1806,8 @@
       const notes = [];
       if (p.summed.length) notes.push(`Summed over ${p.summed.map((c) => cols[c].name).join(', ')}.`);
       if (p.chart.series !== FIELD_SERIES && cols[p.chart.value].delta) {
-        notes.push(`Δ = file 2 − file 1${p.signColors ? ' (blue: higher in file 2, red: lower)' : ''}; records in only one file have no Δ.`);
+        const what = cols[p.chart.value].relative ? 'Δ% = (file 2 − file 1) / |file 1| × 100' : 'Δ = file 2 − file 1';
+        notes.push(`${what}${p.signColors ? ' (blue: higher in file 2, red: lower)' : ''}; records in only one file have no Δ.`);
       }
       const skipped = Object.entries(p.skipped).map(([k, n]) => `${fmt.format(n)} ${SPECIAL_LABEL[k]}`);
       if (skipped.length) notes.push(`Not shown: ${skipped.join(', ')}.`);
@@ -1848,16 +1862,21 @@
     moveDim(dim, zone, pos) {
       const rows = this.state.rowDims.filter((d) => d !== dim);
       const cols = this.state.colDims.filter((d) => d !== dim);
-      const target = zone === 'rows' ? rows : cols;
+      const agg = (this.state.aggDims || []).filter((d) => d !== dim);
+      const target = zone === 'rows' ? rows : zone === 'cols' ? cols : agg;
       target.splice(Math.max(0, Math.min(pos, target.length)), 0, dim);
       this.state.rowDims = rows;
       this.state.colDims = cols;
+      this.state.aggDims = agg;
       this.state.page = 0;
       this.state.colPage = 0;
       this.query();
     }
 
     renderChips(p) {
+      /** Enter and double-click move a dimension to the next zone: rows, columns, aggregated. */
+      const NEXT = { rows: 'cols', cols: 'agg', agg: 'rows' };
+      const ZONE_NAMES = { rows: 'rows', cols: 'columns', agg: 'aggregated' };
       const chip = (dim, zone, pos) => {
         const c = p.allColumns[dim];
         const el = h(
@@ -1868,7 +1887,7 @@
             tabindex: 0,
             role: 'button',
             dataset: { dim: String(dim) },
-            title: `${c.name}: drag to rearrange; Enter moves it to the ${zone === 'rows' ? 'columns' : 'rows'}; Alt+←/→ reorders`,
+            title: `${c.name}: drag to rows, columns or Aggregated; Enter moves it to the ${ZONE_NAMES[NEXT[zone]]}; Alt+←/→ reorders`,
             ondragstart: (e) => {
               e.dataTransfer.setData('text/plain', String(dim));
               e.dataTransfer.effectAllowed = 'move';
@@ -1880,11 +1899,12 @@
               el.classList.remove('dragging');
               this.chipBar.querySelectorAll('.drop-before,.drop-end').forEach((x) => x.classList.remove('drop-before', 'drop-end'));
             },
-            ondblclick: () => this.moveDim(dim, zone === 'rows' ? 'cols' : 'rows', Infinity),
+            ondblclick: () => this.moveDim(dim, NEXT[zone], Infinity),
+            'aria-label': `${c.name} (${ZONE_NAMES[zone]})`,
             onkeydown: (e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                this.moveDim(dim, zone === 'rows' ? 'cols' : 'rows', Infinity);
+                this.moveDim(dim, NEXT[zone], Infinity);
               } else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
                 e.preventDefault();
                 this.moveDim(dim, zone, pos + (e.key === 'ArrowLeft' ? -1 : 1));
@@ -1955,8 +1975,43 @@
         ),
         h('span', { class: 'zone-label' }, 'Columns'),
         zone('cols', p.colDims, valueChips),
+        h('span', { class: 'zone-label', title: 'Dimensions dragged here are combined in the cells' }, 'Aggregated'),
+        zone('agg', p.aggDims, p.aggDims.length ? [] : [h('span', { class: 'zone-hint' }, 'drop a dimension to aggregate')]),
+        this.aggregateControls(p),
       );
       this.chipBar.hidden = false;
+    }
+
+    /** The aggregate (of aggregated cells and totals) and the totals switch of the table view. */
+    aggregateControls(p) {
+      const names = { sum: 'Sum', mean: 'Mean', min: 'Min', max: 'Max', count: 'Count' };
+      const select = h(
+        'select',
+        {
+          'aria-label': 'Aggregate',
+          title: 'How aggregated cells and totals are computed (EPS counts as 0; set elements are counted)',
+          onchange: () => {
+            this.state.aggregate = select.value;
+            this.query();
+          },
+        },
+        ...Object.entries(names).map(([v, text]) => h('option', { value: v }, text)),
+      );
+      select.value = p.aggregate;
+      const totals = h('input', {
+        type: 'checkbox',
+        onchange: () => {
+          this.state.totals = totals.checked;
+          this.query();
+        },
+      });
+      totals.checked = !!this.state.totals;
+      return h(
+        'span',
+        { class: 'agg-controls' },
+        select,
+        h('label', { class: 'check', title: 'A total row and total columns, computed with the aggregate' }, totals, 'Totals'),
+      );
     }
 
     renderPivot(p) {
@@ -1983,10 +2038,11 @@
           const prefix = (k) => p.headers[k].slice(0, level + 1).join('\u0000');
           while (!last && j < p.headers.length && prefix(j) === prefix(i)) j++;
           const kind = p.cellKinds[i];
+          const total = p.totalColumns !== undefined && p.colOffset + i >= p.totalColumns;
           const headEl = h(
               'th',
               {
-                class: 'colhead ' + (last && p.levels[level] === 'Field' ? kind : 'key'),
+                class: 'colhead ' + (last && p.levels[level] === 'Field' ? kind : 'key') + (total ? ' total' : ''),
                 colspan: j - i > 1 ? j - i : undefined,
                 title: `${p.headers[i][level] ?? ''}\nClick to select the column${j - i > 1 ? 's' : ''}`,
                 dataset: { c0: String(p.colOffset + i), c1: String(p.colOffset + j - 1) },
@@ -2011,7 +2067,7 @@
       let prev = null;
       p.rows.forEach((row, ri) => {
         const abs = p.offset + ri;
-        const tr = h('tr');
+        const tr = h('tr', { class: abs === p.totalRow ? 'total' : undefined });
         const selector = { row: String(abs) };
         if (p.rowDims.length) {
           let same = !!prev;
@@ -2029,6 +2085,7 @@
           if (v === '') cls += ' none';
           else if (cls === 'value' && SPECIAL.has(v.toLowerCase())) cls += ' special';
           const c = p.colOffset + i;
+          if (p.totalColumns !== undefined && c >= p.totalColumns) cls += ' total';
           const td = h('td', { class: cls, title: exactTitle(row, i), dataset: { r: String(abs), c: String(c) } }, v);
           this.cellMap.set(abs + ',' + c, td);
           tr.append(td);
