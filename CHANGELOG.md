@@ -8,6 +8,11 @@
   `gdx_compare_scenarios` combine the records into one row per group of dimensions (sum, mean, min, max or count,
   as in the table view), e.g. the total per region of a symbol with millions of records, or per scenario. Filters
   select the records first; sorting and paging apply to the groups.
+- **git diff of GDX files as text:** **GDX: Set Up Git Diff for GDX Files…** lets `git diff`, `git log -p` and
+  `git show` show GDX files in the format of gdxdump, with the declaration of the symbol in the header of each
+  change, for one repository (`.gitattributes`) or all of them. It needs neither GAMS nor GAMSPy and keeps working
+  after updates of the extension. Files that are not GDX files (e.g. Git LFS pointers) are shown as they are.
+- **Command line:** `node out/cli.js dump <file> [<symbol>] [--csv]` writes the text of gdxdump without GAMS.
 
 ## 0.10.1
 

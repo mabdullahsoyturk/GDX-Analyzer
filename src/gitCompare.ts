@@ -15,14 +15,16 @@ interface GitCommit {
   authorDate?: Date;
 }
 
-interface GitRepository {
+export interface GitRepository {
   readonly rootUri: vscode.Uri;
   /** The contents of a file at a revision ('' is the staged version). */
   buffer(ref: string, path: string): Promise<Buffer>;
   log(options?: { maxEntries?: number; path?: string }): Promise<GitCommit[]>;
 }
 
-interface GitAPI {
+export interface GitAPI {
+  readonly git: { readonly path: string };
+  readonly repositories: GitRepository[];
   getRepository(uri: vscode.Uri): GitRepository | null;
 }
 
@@ -31,7 +33,7 @@ interface GitExtension {
   getAPI(version: 1): GitAPI;
 }
 
-async function gitApi(): Promise<GitAPI> {
+export async function gitApi(): Promise<GitAPI> {
   const ext = vscode.extensions.getExtension<GitExtension>('vscode.git');
   const git = ext && (ext.isActive ? ext.exports : await ext.activate());
   if (!git || !git.enabled) {

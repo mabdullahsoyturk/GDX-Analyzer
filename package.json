@@ -112,6 +112,11 @@
         "category": "GDX"
       },
       {
+        "command": "gdxAnalyzer.setUpGitDiff",
+        "title": "Set Up Git Diff for GDX Files…",
+        "category": "GDX"
+      },
+      {
         "command": "gdxAnalyzer.exportExcel",
         "title": "Export to Excel…",
         "category": "GDX"

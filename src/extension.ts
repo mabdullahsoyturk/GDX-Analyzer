@@ -9,6 +9,7 @@ import { textDecoder } from './tools';
 import { ViewStateStore } from './viewState';
 import { GdxViewerProvider } from './viewer';
 import { registerGitCompare } from './gitCompare';
+import { registerGitDiffSetup } from './gitDiffSetup';
 import { ScenarioPanel } from './scenarios';
 import { registerLinks } from './links';
 import { registerHovers } from './hovers';
@@ -60,6 +61,7 @@ export function activate(context: vscode.ExtensionContext) {
     (file1, file2, labels) => DiffPanel.show(context.extensionUri, context.globalStorageUri, service, file1, file2, labels),
     (err) => service.showError('Comparing with the Git revision failed', err),
   );
+  registerGitDiffSetup(context, () => currentGdx(), (err) => service.showError('Setting up git diff for GDX files failed', err));
 
   /** The GDX file a command applies to: its argument, the active viewer or the active dump document. */
   function currentGdx(arg?: unknown): vscode.Uri | undefined {

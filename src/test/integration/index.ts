@@ -1,5 +1,6 @@
 /* Integration tests, executed inside the VS Code extension host. */
 import assert from 'node:assert/strict';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -260,6 +261,14 @@ const tests: [string, () => Promise<void>][] = [
       assert.ok(ext?.isActive);
       assert.deepEqual(ext.packageJSON.contributes.mcpServerDefinitionProviders, [{ id: 'gdxAnalyzer.mcp', label: 'GDX' }]);
       assert.ok((await vscode.commands.getCommands(true)).includes('gdxAnalyzer.copyMcpServerConfig'));
+    },
+  ],
+  [
+    'registers the setup of git diff for GDX files, with the command line it runs',
+    async () => {
+      const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-analyzer');
+      assert.ok((await vscode.commands.getCommands(true)).includes('gdxAnalyzer.setUpGitDiff'));
+      assert.ok(fs.existsSync(path.join(ext!.extensionPath, 'out', 'cli.js')));
     },
   ],
   [

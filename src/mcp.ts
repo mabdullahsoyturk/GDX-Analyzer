@@ -15,7 +15,7 @@
  */
 import * as readline from 'readline';
 import { GdxQueries, QueryError, TOOL_SPECS } from './gdxQuery';
-import { BackendSetting, GdxTools, ToolError, ToolNotFoundError, resolveTools } from './tools';
+import { GdxTools, ToolError, ToolNotFoundError, resolveToolsFromEnv } from './tools';
 
 /** Protocol versions this server speaks, newest first. */
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -72,12 +72,7 @@ export class McpServer {
   private tools(): GdxTools {
     if (!this.cachedTools) {
       const env = this.env;
-      const resolved = resolveTools({
-        backend: (env.GDX_BACKEND as BackendSetting) || 'auto',
-        gamsSystemDirectory: env.GDX_GAMS_SYSTEM_DIRECTORY,
-        gamspyExecutable: env.GDX_GAMSPY_EXECUTABLE,
-        venvSearchRoots: [process.cwd()],
-      });
+      const resolved = resolveToolsFromEnv(env);
       this.log(`Using ${resolved.backend === 'gams' ? 'GAMS' : 'the GAMSPy CLI'} tools from ${resolved.location}`);
       this.cachedTools = new GdxTools(resolved, (l) => this.log(l), env.GDX_ENCODING?.trim() || 'utf-8');
     }

@@ -1,0 +1,2 @@
+# Show GDX files as text in git diff (GDX Analyzer: GDX: Set Up Git Diff for GDX Files)
+*.gdx diff=gdx

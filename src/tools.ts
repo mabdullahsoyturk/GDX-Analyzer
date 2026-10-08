@@ -253,6 +253,19 @@ export function resolveTools(settings: ToolSettings): ResolvedTools {
   );
 }
 
+/**
+ * The tools as the processes outside VS Code (the MCP server, the command line) find them: with
+ * GDX_BACKEND, GDX_GAMS_SYSTEM_DIRECTORY and GDX_GAMSPY_EXECUTABLE, and a .venv in the working directory.
+ */
+export function resolveToolsFromEnv(env: NodeJS.ProcessEnv = process.env): ResolvedTools {
+  return resolveTools({
+    backend: (env.GDX_BACKEND as BackendSetting) || 'auto',
+    gamsSystemDirectory: env.GDX_GAMS_SYSTEM_DIRECTORY,
+    gamspyExecutable: env.GDX_GAMSPY_EXECUTABLE,
+    venvSearchRoots: [process.cwd()],
+  });
+}
+
 /** Command line arguments for gdxdump (GAMS syntax) or `gamspy gdx dump` (GAMSPy CLI syntax). */
 export function buildDumpArgs(backend: Backend, file: string, o: DumpOptions = {}): string[] {
   if (backend === 'gams') {

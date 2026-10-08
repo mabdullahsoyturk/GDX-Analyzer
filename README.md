@@ -87,6 +87,27 @@ status, aggregation and totals work as in the viewer. The comparison is read aga
 its staged version or any commit of its history, or two of its revisions with each other. Clicking a
 changed GDX file in Source Control shows both versions side by side in the viewer.
 
+**git diff as text.** **Set Up Git Diff for GDX Files…** lets `git diff`, `git log -p`, `git show` and Git tools
+built on them show GDX files as text in the format of gdxdump, instead of *Binary files differ*, with the declaration
+of the symbol in the header of each change:
+
+```diff
+@@ -12,7 +12,7 @@ Set j(*) markets /
+ Alias (ii, i);
+
+ Parameter a(i) capacity of plant i in cases /
+-'seattle' 350,
++'seattle' 360,
+ 'san-diego' 600 /;
+```
+
+Set it up for one repository (it adds `*.gdx diff=gdx` to `.gitattributes`: commit it to share it) or for all
+your repositories (the global Git attributes file). The conversion itself is part of each Git configuration, so
+each user runs the command once; it keeps working after the extension is updated, and needs neither GAMS nor
+GAMSPy. To undo it, run `git config --remove-section diff.gdx` (with `--global` for all repositories) and remove
+the line from the attributes file. The same conversion is available on the command line:
+`node <extension>/out/cli.js dump <file> [<symbol>] [--csv]`.
+
 ### GAMS and Python code
 
 **Links.** GDX file names in `.gms` and Python files are links (Ctrl+click) that open the file in the viewer:
@@ -162,6 +183,7 @@ menu and the viewer.
 | Compare GDX Files (gdxdiff) | Compare two GDX files (more than two: as scenarios) |
 | Compare Scenarios… | Compare a symbol across several GDX files |
 | Compare with Git Revision… (gdxdiff) | Compare a GDX file with a version of it in Git, or two versions with each other |
+| Set Up Git Diff for GDX Files… | Let `git diff` and `git log -p` show GDX files as text, in a repository or in all |
 | Show Symbol in GDX File | Open the symbol under the cursor in a GDX file the GAMS or Python document references |
 | Show Solution Report | Records outside their bounds, binding constraints and levels at bounds of all variables and equations |
 | Export to Excel… | Export symbols to an Excel workbook |
@@ -230,6 +252,9 @@ and 580 MB for a variable; the table view, a sort by Δ and a chart then take 0.
 - Sums of relative differences (Δ%) and of the bounds and scale of variables and equations are left empty in
   aggregated cells and totals; mean, min, max and count are shown.
 - With the `gamspy` backend, file names must end in lower-case `.gdx`.
+- The text of `git diff` is made by Git on your machine: the web pages of GitHub and GitLab still show GDX files as
+  binary. GDX files in Git LFS show the changes of their LFS pointers. The conversion runs `node` if it is on the
+  PATH when the setup is run, else VS Code itself.
 - Excel files are read as their cells hold values: dates are their serial numbers, and formulas give their last
   calculated results.
 - Copying is limited to 5 million cells, and the Excel export to Excel's sheet size (1,048,576 rows, 16,384
