@@ -12,7 +12,7 @@ import { GdxFileInfo, GdxSource, compareFiles, loadDomains, loadFileInfo, loadSy
 import { GdxSymbol, parseDiffOutput } from './parse';
 import { scenarioNames, scenarioTable } from './scenario';
 import { MAX_REPORT_RECORDS, SolutionReport, SymbolSolution, amountText, recordName, solutionReport } from './solutionReport';
-import { BOUND_TOLERANCE, ColumnFilter, ColumnStats, SOLUTION_FILTERS, SolutionFilter, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
+import { AGGREGATES, Aggregate, BOUND_TOLERANCE, Column, ColumnFilter, ColumnStats, RowSelection, SOLUTION_FILTERS, SolutionFilter, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
 import { DiffOptions } from './tools';
 
 export interface ToolSpec {
@@ -65,6 +65,15 @@ const BY_MAGNITUDE = { type: 'boolean', description: 'Sort the sortBy column by 
 const SEARCH = { type: 'string', description: 'Keep only records with a cell containing this text (case-insensitive; * and ? are wildcards).' };
 const LIMIT = { type: 'integer', minimum: 1, maximum: MAX_LIMIT, description: `Records per page (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}).` };
 const PAGE = { type: 'integer', minimum: 0, description: 'Page number, from 0 (default 0).' };
+const GROUP_BY = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Combine the records into one row per combination of the labels of these dimensions (names or 1-based positions), with the other dimensions aggregated, ' +
+    'e.g. ["r"] for totals per region; [] gives one row for all records. filters, solution and search select the records first; sortBy and paging apply to the groups. ' +
+    'Sets give the number of elements (Count). Sums of Δ%, bounds and scale are left empty (use another aggregate).',
+};
+const AGGREGATE = { type: 'string', enum: [...AGGREGATES], description: 'With groupBy: how the records of a group are combined (default sum; count: the number of records with a value).' };
 
 export const TOOL_SPECS: ToolSpec[] = [
   {
@@ -90,7 +99,8 @@ export const TOOL_SPECS: ToolSpec[] = [
     description:
       'Reads the records of a symbol of a GDX file as CSV with exact values, with optional filters, text search and sorting, one page at a time. ' +
       'Variables and equations have the fields Level, Marginal, Lower, Upper and Scale; by default fields that have their default value in every record are left out. ' +
-      'Sets have a Text column with the element texts. Special values are written as Eps, NA, +Inf, -Inf and Undf.',
+      'Sets have a Text column with the element texts. Special values are written as Eps, NA, +Inf, -Inf and Undf. ' +
+      'With groupBy: aggregates (sum, mean, min, max or count) per group of records instead of the records, e.g. the total per region of a symbol with millions of records.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -104,6 +114,8 @@ export const TOOL_SPECS: ToolSpec[] = [
         byMagnitude: BY_MAGNITUDE,
         fields: { type: 'array', items: { type: 'string' }, description: 'Value columns to include, e.g. ["Level", "Marginal"] (default: all, see squeezeDefaults).' },
         squeezeDefaults: { type: 'boolean', description: 'Leave out variable/equation fields that have their default value in every record (default true).' },
+        groupBy: GROUP_BY,
+        aggregate: AGGREGATE,
         limit: LIMIT,
         page: PAGE,
       },
@@ -163,6 +175,8 @@ export const TOOL_SPECS: ToolSpec[] = [
         byMagnitude: BY_MAGNITUDE,
         fields: { type: 'array', items: { type: 'string' }, description: 'Value columns to include, e.g. ["Level", "Δ Level"] (default: all, see squeezeDefaults).' },
         squeezeDefaults: { type: 'boolean', description: 'Leave out variable/equation fields that have their default value in every record (default true).' },
+        groupBy: { ...GROUP_BY, description: `${GROUP_BY.description} Include "Scenario" to keep the scenarios apart, e.g. ["Scenario"] for the total of each scenario.` },
+        aggregate: AGGREGATE,
         limit: LIMIT,
         page: PAGE,
       },
@@ -250,6 +264,8 @@ export class GdxQueries {
   private readonly views = new Map<string, Promise<TableView>>();
   private readonly reports = new Map<string, Cached<SolutionReport>>();
   private readonly diffs = new Map<string, Promise<{ diffFile: string; stdout: string; exitCode: number }>>();
+  /** The groups of the last groupBy query of each view, for paging through them. */
+  private readonly groupViews = new WeakMap<TableView, { key: string; view: TableView; valueColumns: number[]; records: number }>();
   private workDir?: string;
   private diffCount = 0;
 
@@ -471,10 +487,12 @@ export class GdxQueries {
       hidden = columns.flatMap((c, i) => (c.kind !== 'key' && !keep.has(i) ? [i] : []));
     }
     const squeeze = args.squeezeDefaults !== false && !(Array.isArray(args.fields) && args.fields.length);
+    const selection = { filter: this.search(args.search), columnFilters: this.filters(view, args.filters), solution: this.solution(view, args.solution) };
+    if (args.groupBy !== undefined && args.groupBy !== null) {
+      return this.groups(view, args, header, selection, hidden, squeeze, what);
+    }
     const result = view.query({
-      filter: this.search(args.search),
-      columnFilters: this.filters(view, args.filters),
-      solution: this.solution(view, args.solution),
+      ...selection,
       sortColumn: typeof args.sortBy === 'string' ? this.column(view, args.sortBy) : undefined,
       sortDescending: !!args.descending,
       sortAbsolute: !!args.byMagnitude,
@@ -490,6 +508,80 @@ export class GdxQueries {
       lines.push(`Left out (default value in every record): ${squeezed.map((c) => `${columns[c].name}=${defaults[c]}`).join(', ')}`);
     }
     lines.push(csvLine(result.columnIndex.map((c) => columns[c].name)));
+    for (const row of result.rows) {
+      lines.push(csvLine(row.cells));
+    }
+    if (result.offset + result.rows.length < result.filteredCount) {
+      lines.push(`(more: page=${result.page + 1})`);
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * The records of a view combined into groups (see GROUP_BY) as CSV: the dimensions grouped by, then the
+   * aggregated fields, computed as in the table view of the viewer; sorted and paged like records.
+   */
+  private groups(view: TableView, args: Record<string, unknown>, header: string[], selection: RowSelection, hidden: number[], squeeze: boolean, what: string): string {
+    const columns = view.table.columns;
+    const keys = view.keyColumns;
+    if (!Array.isArray(args.groupBy)) {
+      throw new QueryError('"groupBy" must be a list of dimensions, e.g. ["i"].');
+    }
+    const dims = [...new Set(args.groupBy.map((d) => this.column(view, String(d))))];
+    const notKey = dims.find((d) => !keys.includes(d));
+    if (notKey !== undefined) {
+      throw new QueryError(`"groupBy": "${columns[notKey].name}" is not a dimension. The dimensions are: ${keys.map((k) => columns[k].name).join(', ') || 'none'}.`);
+    }
+    const aggregate = (args.aggregate ?? 'sum') as Aggregate;
+    if (!AGGREGATES.includes(aggregate)) {
+      throw new QueryError(`Invalid "aggregate": use one of ${AGGREGATES.join(', ')}.`);
+    }
+    const key = JSON.stringify([selection, hidden, squeeze, dims, aggregate]);
+    let grouped = this.groupViews.get(view);
+    if (grouped?.key !== key) {
+      const pivot = view.pivot({
+        ...selection,
+        hidden,
+        squeeze,
+        rowDims: dims,
+        colDims: [],
+        aggDims: keys.filter((k) => !dims.includes(k)),
+        aggregate,
+        pageSize: Number.MAX_SAFE_INTEGER,
+        colPageSize: Number.MAX_SAFE_INTEGER,
+      });
+      const groupColumns: Column[] = [
+        ...dims.map((d): Column => ({ name: columns[d].name, kind: 'key' })),
+        // The aggregate of set element texts is the number of elements.
+        ...pivot.cellColumns.map((c): Column => ({ name: columns[c].kind === 'text' ? 'Count' : columns[c].name, kind: 'value' })),
+      ];
+      const rows = pivot.rows.map((r) => ({ cells: [...r.labels, ...(r.exact ?? r.cells)] }));
+      grouped = { key, view: new TableView({ columns: groupColumns, rows }), valueColumns: pivot.valueColumns, records: pivot.filteredCount };
+      this.groupViews.set(view, grouped);
+    }
+    const groups = grouped.view;
+    const { limit, page } = this.paging(args);
+    const result = groups.query({
+      sortColumn: typeof args.sortBy === 'string' ? this.column(groups, args.sortBy) : undefined,
+      sortDescending: !!args.descending,
+      sortAbsolute: !!args.byMagnitude,
+      page,
+      pageSize: limit,
+    });
+    const names = (list: number[]) => list.map((c) => columns[c].name).join(', ');
+    const over = keys.filter((k) => !dims.includes(k));
+    const of = grouped.records === view.length ? plural(view.length, what) : `${plural(grouped.records, `matching ${what}`)} (${view.length.toLocaleString('en-US')} in total)`;
+    const lines = [
+      ...header,
+      `${dims.length ? `Grouped by ${names(dims)}` : 'All in one group'}: ${aggregate} over ${over.length ? names(over) : 'no other dimension'} of ${of}`,
+      this.range(result.offset, result.rows.length, result.filteredCount, result.totalCount, 'group'),
+    ];
+    const squeezed = squeeze ? view.squeezableColumns().filter((c) => !grouped!.valueColumns.includes(c)) : [];
+    if (squeezed.length) {
+      const defaults = view.table.defaults ?? [];
+      lines.push(`Left out (default value in every record): ${squeezed.map((c) => `${columns[c].name}=${defaults[c]}`).join(', ')}`);
+    }
+    lines.push(csvLine(result.columnIndex.map((c) => groups.table.columns[c].name)));
     for (const row of result.rows) {
       lines.push(csvLine(row.cells));
     }

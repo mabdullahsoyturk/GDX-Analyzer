@@ -80,6 +80,34 @@ describe('GDX queries for agents', { skip: resolved ? false : 'GAMS tools not fo
     await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', solution: 'binding' }), /Invalid "solution"/);
   });
 
+  it('groups records by dimensions, with filters first and sorting and paging of the groups', async () => {
+    const sum = await queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', groupBy: ['i'] });
+    assert.match(sum, /^Grouped by i: sum over j of 6 records\nRows 1-2 of 2 groups\n/m);
+    assert.match(sum, /i,Level,Marginal\nseattle,350,0\.036000000000000004\nsan-diego,550,0\.009000000000000008$/);
+    const max = await queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', groupBy: ['j'], aggregate: 'max', filters: { i: ['seattle'] }, sortBy: 'L', descending: true, limit: 2 });
+    assert.match(max, /Grouped by j: max over i of 3 matching records \(6 in total\)\nRows 1-2 of 3 groups/);
+    assert.match(max, /j,Level,Marginal\nchicago,300,0\nnew-york,50,0\n\(more: page=1\)$/);
+    // By position; all records in one group; sets count their elements.
+    assert.match(await queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'd', groupBy: ['2'], aggregate: 'mean' }), /j,Value\nnew-york,2\.5\nchicago,1\.75\ntopeka,1\.6$/);
+    assert.match(await queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', groupBy: [], fields: ['Level'] }), /All in one group: sum over i, j of 6 records\n.*\nLevel\n900$/);
+    assert.match(await queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'j', groupBy: [] }), /Count\n3$/);
+    // Scenarios: totals per scenario and region, the largest change first.
+    const scenarios = await queries.call('gdx_compare_scenarios', {
+      files: ['transport1.gdx', 'transport2.gdx'],
+      symbol: 'x',
+      groupBy: ['Scenario', 'i'],
+      fields: ['Level', 'Δ Level'],
+      sortBy: 'Δ Level',
+      byMagnitude: true,
+      descending: true,
+    });
+    assert.match(scenarios, /Grouped by Scenario, i: sum over j of 12 rows/);
+    assert.match(scenarios, /Scenario,i,Level,Δ Level\ntransport2,seattle,360,10\ntransport2,san-diego,540,-10\n/);
+    await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', groupBy: ['Level'] }), /"Level" is not a dimension. The dimensions are: i, j/);
+    await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', groupBy: 'i' }), /must be a list of dimensions/);
+    await assert.rejects(queries.call('gdx_read_symbol', { file: 'transport1.gdx', symbol: 'x', groupBy: ['i'], aggregate: 'median' }), /Invalid "aggregate"/);
+  });
+
   it('compares files and shows the differing records of a symbol', async () => {
     const summary = await queries.call('gdx_compare', { file1: 'transport1.gdx', file2: 'transport2.gdx' });
     assert.match(summary, /5 symbols differ/);

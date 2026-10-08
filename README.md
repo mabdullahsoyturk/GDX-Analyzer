@@ -137,10 +137,10 @@ available to agent mode in VS Code automatically. For Claude Code, Cursor and ot
 | Tool | Description |
 | --- | --- |
 | `gdx_list_symbols` | The symbols of a file with type, dimension, domain, records and text |
-| `gdx_read_symbol` | Records as CSV with exact values; filters (including solution status), search, sorting and paging |
+| `gdx_read_symbol` | Records as CSV with exact values; filters (including solution status), search, sorting and paging; or grouped by dimensions with sum, mean, min, max or count |
 | `gdx_symbol_stats` | Distinct labels per dimension; count, sum, mean, min, max and special values per field, optionally filtered |
 | `gdx_compare` | The differing symbols of two files, or the differing records of one symbol with Δ and Δ%, sortable by magnitude |
-| `gdx_compare_scenarios` | One symbol across several files, with Δ and Δ% from a base scenario; filters, sorting by magnitude and paging |
+| `gdx_compare_scenarios` | One symbol across several files, with Δ and Δ% from a base scenario; filters, grouping, sorting by magnitude and paging |
 | `gdx_solution_report` | The solution status of all variables and equations: records outside their bounds, binding constraints, levels at bounds |
 
 ## Getting started

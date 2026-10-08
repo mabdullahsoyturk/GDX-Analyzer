@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Grouping for AI agents:** `groupBy` and `aggregate` of the MCP tools `gdx_read_symbol` and
+  `gdx_compare_scenarios` combine the records into one row per group of dimensions (sum, mean, min, max or count,
+  as in the table view), e.g. the total per region of a symbol with millions of records, or per scenario. Filters
+  select the records first; sorting and paging apply to the groups.
+
 ## 0.10.1
 
 ### Added
