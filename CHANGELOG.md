@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.1
+
+### Added
+
+- **Heatmap in the viewer and comparisons** (like GAMS Studio's): **Heatmap** colors the numbers of the list and
+  table view by value, each field on its own scale, of all records or of the filtered ones. Aggregated cells are
+  colored on the scale of the aggregated cells.
+- **Selected first** in label filters lists the selected labels before the others (setting
+  `gdxAnalyzer.labelFilter.selectedFirst`).
+- **Default view of symbols:** settings `gdxAnalyzer.defaultView` (list or table view) and
+  `gdxAnalyzer.defaultFields` (the fields of variables and equations shown) apply to symbols shown for the first
+  time and after **Reset**.
+- **GDX: Auto-Fit Columns** (Ctrl+R in the viewer and comparisons, as in GAMS Studio).
+- **Save Symbols as GDX…** (in the export dialog of the viewer, the Explorer and the Command Palette): copies
+  symbols into a new GDX file, all of their records or those passing the filters of their views, with their types,
+  texts, comments, domains, set element texts, acronyms and exact values.
+- **Create GDX from CSV/Excel…** (in the Explorer and the Command Palette): makes a GDX file of a CSV file or an
+  Excel sheet, like csv2gdx, asking for the columns with labels and the type of the symbol.
+
+### Fixed
+
+- **Auto-fit columns** did not narrow columns that had been widened by longer values while scrolling.
+
 ## 0.10.0
 
 ### Added
@@ -17,20 +40,6 @@
 - **GAMSPy and GAMS Transfer symbols are links:** those of `read()`, `write()` and `loadRecordsFromGdx()`
   (`symbol_names=`, `symbols=` or a list after the file) and `m["x"]` of a container read from a file.
 - **Notebooks:** links, hovers and **GDX: Show Symbol in GDX File** also find the GDX files read in other cells.
-- **Heatmap in the viewer and comparisons** (like GAMS Studio's): **Heatmap** colors the numbers of the list and
-  table view by value, each field on its own scale, of all records or of the filtered ones. Aggregated cells are
-  colored on the scale of the aggregated cells.
-- **Selected first** in label filters lists the selected labels before the others (setting
-  `gdxAnalyzer.labelFilter.selectedFirst`).
-- **Default view of symbols:** settings `gdxAnalyzer.defaultView` (list or table view) and
-  `gdxAnalyzer.defaultFields` (the fields of variables and equations shown) apply to symbols shown for the first
-  time and after **Reset**.
-- **GDX: Auto-Fit Columns** (Ctrl+R in the viewer and comparisons, as in GAMS Studio).
-- **Save Symbols as GDX…** (in the export dialog of the viewer, the Explorer and the Command Palette): copies
-  symbols into a new GDX file, all of their records or those passing the filters of their views, with their types,
-  texts, comments, domains, set element texts, acronyms and exact values.
-- **Create GDX from CSV/Excel…** (in the Explorer and the Command Palette): makes a GDX file of a CSV file or an
-  Excel sheet, like csv2gdx, asking for the columns with labels and the type of the symbol.
 - **No GAMS tools needed:** GDX files are read, compared and dumped by the extension itself instead of gdxdump and
   gdxdiff, with the same results, so every feature works on any platform without GAMS.
   - Reading is 5 to 9 times faster (10 million records in 0.4 s instead of 3.8 s). The GDX file formats 5 to 7 are
@@ -50,7 +59,6 @@
 
 ### Fixed
 
-- **Auto-fit columns** did not narrow columns that had been widened by longer values while scrolling.
 - The MCP server exited when its client closed its input, before answering the requests still in progress.
 - The universe of files with more than 999 unique elements showed 0 labels (gdxdump writes the count as 1,000).
 - Text dumps of files with acronyms declare all of them (gdxdump writes an empty first one and leaves out the last).
