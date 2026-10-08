@@ -973,6 +973,11 @@ export class TableView {
     };
   }
 
+  /** The rows (record positions) matching a selection, in the order of the records. */
+  matchingRows(selection: RowSelection): Int32Array {
+    return this.indexFor({ filter: selection.filter, columnFilters: selection.columnFilters, solution: selection.solution, format: selection.format });
+  }
+
   /** Statistics of every column over the rows matching the selection; `maxLabels` limits ColumnStats.labels. */
   stats(selection: RowSelection, maxLabels = 10): { rows: number; columns: ColumnStats[] } {
     const index = this.indexFor(selection);

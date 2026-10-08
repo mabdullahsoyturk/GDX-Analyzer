@@ -14,6 +14,7 @@ import { registerLinks } from './links';
 import { registerHovers } from './hovers';
 import { registerMcpServer } from './mcpProvider';
 import { postToActiveTable } from './tableHost';
+import { createGdxFromTable } from './importCommand';
 
 const LARGE_FILE_BYTES = 100 * 1024 * 1024;
 const GDX_FILTER = { 'GDX files': ['gdx'] };
@@ -91,6 +92,22 @@ export function activate(context: vscode.ExtensionContext) {
 
   async function gdxOrPick(arg: unknown, title: string): Promise<vscode.Uri | undefined> {
     return currentGdx(arg) ?? (await pickGdx(title));
+  }
+
+  /** Opens the export dialog of a file's viewer (opening the viewer if needed). */
+  async function openExportDialog(arg: unknown, title: string) {
+    const uri = await gdxOrPick(arg, title);
+    if (!uri) {
+      return;
+    }
+    let session = viewer.sessionFor(uri);
+    if (!session) {
+      await vscode.commands.executeCommand('vscode.openWith', uri, GdxViewerProvider.viewType);
+      session = viewer.sessionFor(uri);
+    }
+    if (session && (await session.whenLoaded())) {
+      session.openExport();
+    }
   }
 
   /** Symbols of a file, from its open viewer if possible. */
@@ -320,21 +337,16 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand(
       'gdxAnalyzer.exportExcel',
-      guarded('Exporting failed', async (arg?: unknown) => {
-        const uri = await gdxOrPick(arg, 'Export GDX File to Excel');
-        if (!uri) {
-          return;
-        }
-        let session = viewer.sessionFor(uri);
-        if (!session) {
-          await vscode.commands.executeCommand('vscode.openWith', uri, GdxViewerProvider.viewType);
-          session = viewer.sessionFor(uri);
-        }
-        if (session && (await session.whenLoaded())) {
-          session.openExport();
-        }
-      }),
+      guarded('Exporting failed', (arg?: unknown) => openExportDialog(arg, 'Export GDX File to Excel')),
     ),
+
+    // The same dialog, which also saves symbols (with the filters of their views) as a new GDX file.
+    vscode.commands.registerCommand(
+      'gdxAnalyzer.exportGdx',
+      guarded('Saving as GDX failed', (arg?: unknown) => openExportDialog(arg, 'Save Symbols of GDX File as GDX')),
+    ),
+
+    vscode.commands.registerCommand('gdxAnalyzer.createFromTable', guarded('Creating the GDX file failed', createGdxFromTable)),
 
     vscode.commands.registerCommand(
       'gdxAnalyzer.solutionReport',

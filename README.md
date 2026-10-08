@@ -114,12 +114,19 @@ GDX files read in other cells count too. Symbols with more than 200,000 records 
 the view: filters, solution status, sorting, shown fields and the table view (as `pivot_table`, with aggregation and
 totals). Copy it or open it in a new editor.
 
-### Export
+### Export and import
 
 - **Excel:** write any symbols to an `.xlsx` workbook, one sheet each, laid out like their view, with exact values.
   Optionally apply the filters and choose how special values are written. The same export can be saved as GAMS
   Connect instructions.
+- **GDX:** save any symbols as a new GDX file, all their records or only those passing the filters of their views,
+  with their fields, texts, domains and exact values. An alias brings its set along; a regular domain whose set is
+  not saved, or whose set's saved records leave out some records, is written as a relaxed domain.
 - **CSV** of one symbol, and the **gdxdump output** of a file or symbol as a text document.
+- **From CSV and Excel:** **Create GDX from CSV/Excel…** (also in the Explorer) makes a GDX file of a table, like
+  csv2gdx: choose the columns with labels; one other column gives a parameter, several give a parameter with an extra
+  dimension named after them, and a set takes its element texts from another column. Numbers may use a decimal
+  comma in semicolon separated files, and EPS, NA, INF, -INF and UNDF are read as special values.
 
 ### AI agents (MCP)
 
@@ -158,6 +165,8 @@ menu and the viewer.
 | Show Symbol in GDX File | Open the symbol under the cursor in a GDX file the GAMS or Python document references |
 | Show Solution Report | Records outside their bounds, binding constraints and levels at bounds of all variables and equations |
 | Export to Excel… | Export symbols to an Excel workbook |
+| Save Symbols as GDX… | Save symbols (optionally only their filtered records) as a new GDX file |
+| Create GDX from CSV/Excel… | Make a GDX file of a CSV file or an Excel sheet |
 | Export Symbol to CSV | Save the records of a symbol as CSV |
 | Dump to Text / Dump Symbol to Text | Open the gdxdump output of a file or symbol |
 | Select Encoding of Labels… | Read labels and texts in another encoding (e.g. Latin-1) |
@@ -221,6 +230,8 @@ and 580 MB for a variable; the table view, a sort by Δ and a chart then take 0.
 - Sums of relative differences (Δ%) and of the bounds and scale of variables and equations are left empty in
   aggregated cells and totals; mean, min, max and count are shown.
 - With the `gamspy` backend, file names must end in lower-case `.gdx`.
+- Excel files are read as their cells hold values: dates are their serial numbers, and formulas give their last
+  calculated results.
 - Copying is limited to 5 million cells, and the Excel export to Excel's sheet size (1,048,576 rows, 16,384
   columns). Filter larger symbols first.
 

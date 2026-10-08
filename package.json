@@ -117,6 +117,16 @@
         "category": "GDX"
       },
       {
+        "command": "gdxAnalyzer.exportGdx",
+        "title": "Save Symbols as GDX…",
+        "category": "GDX"
+      },
+      {
+        "command": "gdxAnalyzer.createFromTable",
+        "title": "Create GDX from CSV/Excel…",
+        "category": "GDX"
+      },
+      {
         "command": "gdxAnalyzer.solutionReport",
         "title": "Show Solution Report",
         "category": "GDX"
@@ -175,6 +185,11 @@
           "group": "gdx@2"
         },
         {
+          "command": "gdxAnalyzer.exportGdx",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
+          "group": "gdx@2"
+        },
+        {
           "command": "gdxAnalyzer.solutionReport",
           "when": "resourceExtname == .gdx && !explorerResourceIsFolder",
           "group": "gdx@3"
@@ -208,6 +223,11 @@
           "command": "gdxAnalyzer.compareWithRevision",
           "when": "resourceExtname == .gdx && !explorerResourceIsFolder && !listMultiSelection && gitOpenRepositoryCount != 0",
           "group": "3_compare@14"
+        },
+        {
+          "command": "gdxAnalyzer.createFromTable",
+          "when": "resourceExtname =~ /^\\.(csv|tsv|xlsx|xlsm)$/i && !explorerResourceIsFolder",
+          "group": "gdx@1"
         }
       ],
       "editor/context": [

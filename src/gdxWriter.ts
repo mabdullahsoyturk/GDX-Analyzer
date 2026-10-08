@@ -1,7 +1,7 @@
 /**
  * Writes GDX files (format version 7, uncompressed) as the GDX library of GAMS does (see
- * https://github.com/GAMS-dev/gdx, src/gxfile.cpp, MIT license), for the difference files of
- * gdxDiff.ts. Strings are written one byte per character (so that labels read with RAW_BYTES of
+ * https://github.com/GAMS-dev/gdx, src/gxfile.cpp, MIT license): the difference files of
+ * gdxDiff.ts, copies of symbols (gdxSubset.ts) and files made from tables (gdxImport.ts). Strings are written one byte per character (so that labels read with RAW_BYTES of
  * gdxReader.ts are written unchanged, whatever their encoding).
  *
  * No dependency on `vscode`.
@@ -112,6 +112,20 @@ interface WrittenSymbol {
   count: number;
   hasSetText: boolean;
   text: string;
+  /** Regular domain: the numbers of the domain sets (0: the universe). */
+  domainSymbols?: number[];
+  /** Relaxed domain: the numbers of the domain names (from 1; 0: the universe). */
+  domainStrings?: number[];
+  comments: string[];
+}
+
+/** The domain and comments of a symbol (gdxSymbolSetDomain, gdxSymbolSetDomainX, gdxSymbolAddComment). */
+export interface SymbolExtras {
+  /** Regular domain: the symbol numbers (as returned by startSymbol and addAlias) of the domain sets, 0 for the universe. */
+  domainSymbols?: number[];
+  /** Relaxed domain: the names of the domains, '*' for the universe. */
+  domainNames?: string[];
+  comments?: string[];
 }
 
 /** A GDX file written in memory: symbols one after another, then the tables. */
@@ -124,6 +138,9 @@ export class GdxWriter {
   private readonly setTexts: string[] = [''];
   private readonly setTextNumbers = new Map<string, number>([['', 0]]);
   private readonly acronyms: number[] = [];
+  private readonly acronymNames = new Map<number, { name: string; text: string }>();
+  private readonly domainStrings: string[] = [];
+  private readonly domainStringNumbers = new Map<string, number>();
   /** The symbol being written: its records kept (sorted at its end) or written as they come (`stream`). */
   private current?: {
     symbol: WrittenSymbol;
@@ -192,16 +209,48 @@ export class GdxWriter {
   /**
    * Starts a symbol (gdxDataWriteStrStart): its records follow with `record`, then `endSymbol`.
    * With the ranges of its keys (`bounds`), records given in order of their keys are written
-   * as they come; otherwise they are kept and sorted.
+   * as they come; otherwise they are kept and sorted. Returns the number of the symbol (from 1).
    */
-  startSymbol(name: string, text: string, dim: number, type: number, userInfo: number, bounds?: { min: number[]; max: number[] }) {
-    const symbol: WrittenSymbol = { name, position: 0, dim, type, userInfo, count: 0, hasSetText: false, text: goodText(text) };
+  startSymbol(name: string, text: string, dim: number, type: number, userInfo: number, bounds?: { min: number[]; max: number[] }, extras?: SymbolExtras): number {
+    const symbol: WrittenSymbol = { name, position: 0, dim, type, userInfo, count: 0, hasSetText: false, text: goodText(text), comments: extras?.comments ?? [] };
+    if (extras?.domainSymbols) {
+      symbol.domainSymbols = extras.domainSymbols.slice(0, dim);
+    } else if (extras?.domainNames) {
+      symbol.domainStrings = extras.domainNames.slice(0, dim).map((d) => (d === '*' ? 0 : this.domainString(d)));
+    }
     this.symbols.push(symbol);
     const fields = VALUE_COUNT[type];
     this.current = { symbol, fields, keys: new Int32Array(dim * 1024), values: new Float64Array(fields * 1024), count: 0, added: 0, last: Array<number>(dim).fill(INDEX_INITIAL) };
     if (bounds) {
       this.current.stream = this.dataHeader(symbol, bounds.min, bounds.max);
     }
+    return this.symbols.length;
+  }
+
+  /**
+   * Adds an alias (gdxAddAlias) of the set with the number `setNumber` (0: the universe), which has
+   * `dim` dimensions; aliases have no records. Returns the number of the alias.
+   */
+  addAlias(name: string, setNumber: number, dim: number, text: string): number {
+    this.symbols.push({ name, position: 0, dim: setNumber ? dim : 1, type: 4, userInfo: setNumber, count: 0, hasSetText: false, text: goodText(text), comments: [] });
+    return this.symbols.length;
+  }
+
+  /** The name and text of the acronym with an index (gdxAcronymSetInfo); others are written as UnknownACRO<index>. */
+  acronym(index: number, name: string, text: string) {
+    this.acronymNames.set(index, { name, text: goodText(text) });
+  }
+
+  /** The number (from 1) of a domain name of relaxed domains. */
+  private domainString(name: string): number {
+    const key = asciiLower(name);
+    let nr = this.domainStringNumbers.get(key);
+    if (nr === undefined) {
+      this.domainStrings.push(name);
+      nr = this.domainStrings.length;
+      this.domainStringNumbers.set(key, nr);
+    }
+    return nr;
   }
 
   /** Starts the data of a symbol: the record count (set at its end) and the ranges of its keys. */
@@ -311,7 +360,8 @@ export class GdxWriter {
         }
         return a - b;
       });
-      const min = Array<number>(dim).fill(Number.MAX_SAFE_INTEGER);
+      // Without records, the ranges are as the GDX library writes them (InitDoWrite).
+      const min = Array<number>(dim).fill(0x7fffffff);
       const max = Array<number>(dim).fill(0);
       for (let r = 0; r < count; r++) {
         for (let d = 0; d < dim; d++) {
@@ -346,8 +396,10 @@ export class GdxWriter {
       o.byte(s.hasSetText ? 1 : 0);
       o.string(s.text);
       o.byte(0); // not compressed
-      o.byte(0); // no domain symbols
-      o.int(0); // no comments
+      o.byte(s.domainSymbols ? 1 : 0);
+      for (const d of s.domainSymbols ?? []) o.int(d);
+      o.int(s.comments.length);
+      for (const c of s.comments) o.string(c);
     }
     o.string('_SYMB_');
     const setTextPos = o.length;
@@ -365,15 +417,22 @@ export class GdxWriter {
     o.int(this.acronyms.length);
     for (const index of this.acronyms) {
       // Acronyms without a name, as values written by the library get them.
-      o.string(`UnknownACRO${index}`);
-      o.string('');
+      const info = this.acronymNames.get(index);
+      o.string(info?.name || `UnknownACRO${index}`);
+      o.string(info?.text ?? '');
       o.int(index);
     }
     o.string('_ACRO_');
     const domainPos = o.length;
     o.string('_DOMS_');
-    o.int(0);
+    o.int(this.domainStrings.length);
+    for (const d of this.domainStrings) o.string(d);
     o.string('_DOMS_');
+    this.symbols.forEach((s, k) => {
+      if (!s.domainStrings) return;
+      o.int(k + 1);
+      for (const d of s.domainStrings) o.int(d);
+    });
     o.int(-1);
     o.string('_DOMS_');
     const nextWrite = o.length;

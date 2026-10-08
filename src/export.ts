@@ -6,7 +6,7 @@
 import { NumberFormat, normalizeFormat } from './format';
 import type { GdxSymbol } from './parse';
 import { TextSearch } from './search';
-import { Aggregate, ColumnFilter, SolutionFilter, SpecialValue, TableView, specialOf } from './table';
+import { Aggregate, ColumnFilter, RowSelection, SolutionFilter, SpecialValue, TableView, specialOf } from './table';
 import { MAX_COLS, MAX_ROWS, Sheet, SheetCell, sheetNames } from './xlsx';
 
 /** The per-symbol view state of the webview (see media/table.js). */
@@ -56,16 +56,29 @@ function isPivot(item: ExportItem): boolean {
   return item.state?.view === 'table' && item.symbol.dim >= 2;
 }
 
+/** The rows of a symbol's view: those passing its filters (and its "filter rows" search), or all. */
+export function filterSelection(state: SymbolViewState | undefined, applyFilters: boolean, defaultFormat: NumberFormat): RowSelection {
+  const st = state ?? {};
+  const search = st.search?.text && st.search.filterRows ? st.search : undefined;
+  return {
+    columnFilters: applyFilters ? (st.columnFilters ?? []) : [],
+    solution: applyFilters ? st.solution : undefined,
+    filter: applyFilters ? search : undefined,
+    // Rows are matched against the displayed values, as in the viewer.
+    format: st.format ? normalizeFormat(st.format, defaultFormat) : defaultFormat,
+  };
+}
+
+/** True if the view of a symbol leaves out rows. */
+export function hasFilters(state: SymbolViewState | undefined): boolean {
+  return !!(state?.columnFilters?.length || state?.solution || (state?.search?.text && state.search.filterRows));
+}
+
 /** The query of a symbol's view for the export. */
 function exportQuery(item: ExportItem, options: ExportOptions, defaults: ExportDefaults) {
   const st = item.state ?? {};
-  const search = st.search?.text && st.search.filterRows ? st.search : undefined;
   return {
-    columnFilters: options.applyFilters ? (st.columnFilters ?? []) : [],
-    solution: options.applyFilters ? st.solution : undefined,
-    filter: options.applyFilters ? search : undefined,
-    // Rows are matched against the displayed values, as in the viewer.
-    format: st.format ? normalizeFormat(st.format, defaults.format) : defaults.format,
+    ...filterSelection(st, options.applyFilters, defaults.format),
     sortColumn: st.sortColumn,
     sortDescending: st.sortDescending,
     sortAbsolute: st.sortAbsolute,

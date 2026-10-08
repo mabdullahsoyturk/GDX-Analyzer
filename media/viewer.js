@@ -418,7 +418,7 @@
   ];
   const DEFAULT_SPECIALS = { eps: 'EPS', na: 'NA', pinf: 'INF', minf: '-INF', undf: 'UNDEF' };
 
-  /** Like GAMS Studio's export dialog: symbols, filters, hidden fields and special values. */
+  /** Like GAMS Studio's export dialog: symbols, filters, hidden fields and special values; to Excel, GAMS Connect or GDX. */
   function openExport() {
     if (!file || !exportButton) return;
     const last = saved.exportOptions || {};
@@ -437,7 +437,7 @@
     }
     const sync = () => {
       counter.textContent = chosen.size + ' of ' + symbols.length + ' selected';
-      exportBtn.disabled = connectBtn.disabled = chosen.size === 0;
+      exportBtn.disabled = connectBtn.disabled = gdxBtn.disabled = chosen.size === 0;
     };
     search.addEventListener('input', () => {
       const needle = search.value.trim().toLowerCase();
@@ -479,21 +479,26 @@
     };
     const exportBtn = h('button', { class: 'primary', onclick: () => run('excel') }, 'Export to Excel…');
     const connectBtn = h('button', { onclick: () => run('connect'), title: 'Write the equivalent GAMS Connect instructions (run them with gamsconnect)' }, 'Save Connect Instructions…');
+    const gdxBtn = h(
+      'button',
+      { onclick: () => run('gdx'), title: 'Copy the symbols into a new GDX file with all their fields, texts, domains and exact values (with Apply filters: only the records passing the filters)' },
+      'Save as GDX…',
+    );
     const content = h(
       'div',
       { class: 'filter-popup export-form' },
-      h('div', { class: 'popup-title' }, 'Export to Excel'),
+      h('div', { class: 'popup-title' }, 'Export'),
       search,
       h('div', { class: 'row' }, h('button', { onclick: () => setAll(true) }, 'All'), h('button', { onclick: () => setAll(false) }, 'None'), counter),
       list,
       h('label', { class: 'check', title: 'Apply the column filters of each symbol (and its search in "filter rows" mode)' }, applyFilters, 'Apply filters'),
-      h('label', { class: 'check', title: 'Also export fields hidden with Fields or by squeezing defaults' }, includeHidden, 'Include hidden fields'),
-      h('div', { class: 'muted small' }, 'Special values are written as (numbers are written as numbers):'),
+      h('label', { class: 'check', title: 'Also export fields hidden with Fields or by squeezing defaults' }, includeHidden, 'Include hidden fields (Excel)'),
+      h('div', { class: 'muted small' }, 'In Excel, special values are written as (numbers are written as numbers):'),
       h('div', { class: 'grid2 specials' }, ...specialInputs.flatMap((x) => [h('span', null, x.label), x.input])),
-      h('div', { class: 'muted small' }, 'Each symbol is written to its own sheet, laid out like its view (list or table), with exact values.'),
-      h('div', { class: 'row end wrap' }, exportBtn, connectBtn, h('button', { onclick: () => popup.close(true) }, 'Cancel')),
+      h('div', { class: 'muted small' }, 'Excel: each symbol on its own sheet, laid out like its view (list or table), with exact values. GDX: the symbols as they are in this file, with all their fields.'),
+      h('div', { class: 'row end wrap' }, exportBtn, gdxBtn, connectBtn, h('button', { onclick: () => popup.close(true) }, 'Cancel')),
     );
-    const popup = openPopup(exportButton, content, { label: 'Export to Excel' });
+    const popup = openPopup(exportButton, content, { label: 'Export' });
     sync();
     search.focus();
   }
@@ -597,7 +602,7 @@
         (reportButton = hasSolution()
           ? h('button', { onclick: () => (reportOpen ? closeReport(true) : openReport()), title: 'Records outside their bounds, binding constraints and levels at bounds of all variables and equations' }, 'Solution Report')
           : null),
-        (exportButton = h('button', { onclick: () => openExport(), title: 'Export symbols to Excel, laid out like the viewer shows them' }, 'Export…')),
+        (exportButton = h('button', { onclick: () => openExport(), title: 'Export symbols to Excel, laid out like the viewer shows them, or save them as a new GDX file' }, 'Export…')),
       ),
     );
     const info = h(

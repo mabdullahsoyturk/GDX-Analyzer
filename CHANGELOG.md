@@ -26,6 +26,11 @@
   `gdxAnalyzer.defaultFields` (the fields of variables and equations shown) apply to symbols shown for the first
   time and after **Reset**.
 - **GDX: Auto-Fit Columns** (Ctrl+R in the viewer and comparisons, as in GAMS Studio).
+- **Save Symbols as GDX…** (in the export dialog of the viewer, the Explorer and the Command Palette): copies
+  symbols into a new GDX file, all of their records or those passing the filters of their views, with their types,
+  texts, comments, domains, set element texts, acronyms and exact values.
+- **Create GDX from CSV/Excel…** (in the Explorer and the Command Palette): makes a GDX file of a CSV file or an
+  Excel sheet, like csv2gdx, asking for the columns with labels and the type of the symbol.
 - **No GAMS tools needed:** GDX files are read, compared and dumped by the extension itself instead of gdxdump and
   gdxdiff, with the same results, so every feature works on any platform without GAMS.
   - Reading is 5 to 9 times faster (10 million records in 0.4 s instead of 3.8 s). The GDX file formats 5 to 7 are

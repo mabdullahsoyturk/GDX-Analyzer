@@ -6,7 +6,8 @@ import { GdxSymbol } from './parse';
 import { GdxFileInfo, GdxService, errorMessage } from './service';
 import { TableView, UNIVERSE, cachedView, columnTable, universeSymbol, universeTable } from './table';
 import { CopyRequest, ImageMessage, PreferenceMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, defaultFormat, pageSize, saveChartImage, savePreference, squeezeDefaults, trackTablePanel } from './tableHost';
-import { ExportItem, ExportOptions, SymbolViewState, buildSheets, connectInstructions } from './export';
+import { ExportItem, ExportOptions, SymbolViewState, buildSheets, connectInstructions, filterSelection, hasFilters } from './export';
+import { SubsetItem, writeGdxSubset } from './gdxSubset';
 import { ViewStateStore } from './viewState';
 import { writeXlsx } from './xlsx';
 import { PROTOCOL, webviewHtml } from './webview';
@@ -21,7 +22,7 @@ class GdxDocument implements vscode.CustomDocument {
 type FromWebview =
   | { type: 'ready' }
   | { type: 'saveState'; state: unknown }
-  | { type: 'export'; mode: 'excel' | 'connect'; names: string[]; options: ExportOptions; states: Record<string, SymbolViewState> }
+  | { type: 'export'; mode: 'excel' | 'connect' | 'gdx'; names: string[]; options: ExportOptions; states: Record<string, SymbolViewState> }
   | { type: 'query'; name: string; query: WebviewQuery }
   | { type: 'columnValues'; name: string; column: number }
   | { type: 'code'; name: string; language: CodeLanguage; target: 'clipboard' | 'editor'; state?: SymbolViewState }
@@ -203,8 +204,11 @@ class ViewerSession implements vscode.Disposable {
     this.post({ type: 'openExport' });
   }
 
-  /** Writes the symbols to an Excel file, or the GAMS Connect instructions that do so. */
-  private async export(mode: 'excel' | 'connect', names: string[], options: ExportOptions, states: Record<string, SymbolViewState>) {
+  /** Writes the symbols to an Excel file, or the GAMS Connect instructions that do so, or a new GDX file. */
+  private async export(mode: 'excel' | 'connect' | 'gdx', names: string[], options: ExportOptions, states: Record<string, SymbolViewState>) {
+    if (mode === 'gdx') {
+      return this.exportGdx(names, options, states);
+    }
     if (mode === 'connect' && this.copyOf) {
       vscode.window.showWarningMessage(`The GAMS Connect instructions would read a temporary copy of ${this.copyOf.toString(true)}: save the GDX file on disk first.`);
       return;
@@ -249,6 +253,60 @@ class ViewerSession implements vscode.Disposable {
       }
     } catch (err) {
       this.service.showError('Exporting failed', err);
+    }
+  }
+
+  /**
+   * Copies the symbols into a new GDX file with all their fields and exact values; with
+   * `applyFilters`, only the records passing the filters of their views (see gdxSubset.ts).
+   */
+  private async exportGdx(names: string[], options: ExportOptions, states: Record<string, SymbolViewState>) {
+    const base = this.savePath(path.basename(this.uri.fsPath)).replace(/\.gdx$/i, '');
+    const target = await vscode.window.showSaveDialog({
+      title: 'Save Symbols as GDX',
+      defaultUri: vscode.Uri.file(`${base}_${names.length === 1 ? names[0] : 'subset'}.gdx`),
+      filters: { 'GDX files': ['gdx'] },
+    });
+    if (!target) {
+      return;
+    }
+    if (path.resolve(target.fsPath) === path.resolve(this.uri.fsPath) || (this.copyOf?.scheme === 'file' && path.resolve(target.fsPath) === path.resolve(this.copyOf.fsPath))) {
+      vscode.window.showErrorMessage('Choose another file: the symbols cannot be saved into the GDX file they are read from.');
+      return;
+    }
+    try {
+      const result = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Saving ${names.length} symbol${names.length === 1 ? '' : 's'} as GDX` },
+        async () => {
+          const items: SubsetItem[] = [];
+          for (const name of names) {
+            const state = states[name];
+            if (options.applyFilters && hasFilters(state)) {
+              // The rows of the viewer are the records of the symbol in the order of the file.
+              const view = await this.view(name);
+              items.push({ name, rows: view.matchingRows(filterSelection(state, true, defaultFormat())), recordCount: view.length });
+            } else {
+              items.push({ name });
+            }
+          }
+          return writeGdxSubset(this.uri.fsPath, target.fsPath, items);
+        },
+      );
+      const notes = [
+        ...(result.addedSets.length ? [`Also saved, as sets of the aliases chosen: ${result.addedSets.join(', ')}.`] : []),
+        ...result.relaxed.map((r) => `${r.name} has a relaxed domain (${r.reason}).`),
+      ];
+      notes.forEach((n) => this.service.log(`Save as GDX ${path.basename(target.fsPath)}: ${n}`));
+      const symbols = `${result.symbols.length} symbol${result.symbols.length === 1 ? '' : 's'}`;
+      const choice = await vscode.window.showInformationMessage(
+        `Saved ${symbols} with ${result.records.toLocaleString()} records to ${path.basename(target.fsPath)}.${notes.length ? ' ' + notes.join(' ') : ''}`,
+        'Open',
+      );
+      if (choice) {
+        await vscode.commands.executeCommand('vscode.openWith', target, GdxViewerProvider.viewType);
+      }
+    } catch (err) {
+      this.service.showError('Saving as GDX failed', err);
     }
   }
 
