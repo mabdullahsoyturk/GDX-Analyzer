@@ -35,8 +35,50 @@ export function answerQuery(view: TableView, q: WebviewQuery): QueryAnswer {
   return answer(view, q, { pageSize: pageSize(), colPageSize: colPageSize(), defaultFormat: defaultFormat(), squeezeDefaults: squeezeDefaults() });
 }
 
-export function answerColumnValues(view: TableView, column: number): ColumnValues {
-  return view.columnValues(column);
+/** The labels of a column for its filter, and whether the filter lists the selected labels first. */
+export function answerColumnValues(view: TableView, column: number): ColumnValues & { selectedFirst: boolean } {
+  return { ...view.columnValues(column), selectedFirst: vscode.workspace.getConfiguration('gdxAnalyzer.labelFilter').get<boolean>('selectedFirst', false) };
+}
+
+/** A choice made in a webview that is kept as a setting (like GAMS Studio keeps it), e.g. in the label filter. */
+export interface PreferenceMessage {
+  type: 'preference';
+  key: 'labelFilter.selectedFirst';
+  value: boolean;
+}
+
+const PREFERENCES: readonly string[] = ['labelFilter.selectedFirst'];
+
+/** Saves a preference of a webview in the user settings. */
+export async function savePreference(m: PreferenceMessage, onError: (err: unknown) => void) {
+  if (!PREFERENCES.includes(m.key) || typeof m.value !== 'boolean') {
+    return;
+  }
+  try {
+    await vscode.workspace.getConfiguration('gdxAnalyzer').update(m.key, m.value, vscode.ConfigurationTarget.Global);
+  } catch (err) {
+    onError(err);
+  }
+}
+
+/** The webview panels that show a GdxTable (viewer, comparisons), for commands on the active one. */
+const tablePanels = new Set<vscode.WebviewPanel>();
+
+/** Registers a panel showing a GdxTable until the returned disposable is disposed. */
+export function trackTablePanel(panel: vscode.WebviewPanel): vscode.Disposable {
+  tablePanels.add(panel);
+  return new vscode.Disposable(() => tablePanels.delete(panel));
+}
+
+/** Sends a message to the table of the active panel; false if no such panel is active. */
+export function postToActiveTable(message: unknown): boolean {
+  for (const panel of tablePanels) {
+    if (panel.active) {
+      panel.webview.postMessage(message);
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The decimal separator for copied numbers (setting gdxAnalyzer.copy.decimalSeparator). */

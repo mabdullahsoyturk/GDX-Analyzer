@@ -68,6 +68,26 @@
   }
   const action = (name, extra) => vscode.postMessage(Object.assign({ type: 'action', action: name }, extra || {}));
 
+  /** The fields of variables and equations, in the order of their columns (after the dimensions). */
+  const FIELDS = ['Level', 'Marginal', 'Lower', 'Upper', 'Scale'];
+
+  /**
+   * How a symbol is shown without a saved view (and after Reset), like GAMS Studio's defaults: the
+   * settings gdxAnalyzer.defaultView and gdxAnalyzer.defaultFields (sent by the extension).
+   */
+  function defaultStateOf(name) {
+    const s = file && file.symbols.find((x) => x.name === name);
+    const d = (file && file.viewDefaults) || {};
+    if (!s) return {};
+    const st = {};
+    if (d.view === 'table' && s.dim >= 2) st.view = 'table';
+    if ((s.type === 'Var' || s.type === 'Equ') && d.fields) {
+      // If every field is hidden, all are shown.
+      st.hidden = FIELDS.flatMap((f, k) => (d.fields[f] === false ? [s.dim + k] : []));
+    }
+    return st;
+  }
+
   const table = new GdxTable({
     onQuery: (query) => {
       if (selected) {
@@ -79,6 +99,8 @@
     onCopy: (req) => selected && vscode.postMessage({ type: 'copy', name: selected, ...req }),
     onSelection: (req) => selected && vscode.postMessage({ type: 'selection', name: selected, ...req }),
     onStateChange: () => save(),
+    onPreference: (key, value) => vscode.postMessage({ type: 'preference', key, value }),
+    defaultState: () => (selected ? defaultStateOf(selected) : {}),
     pivot: true,
     chart: true,
     onImage: (m) => selected && vscode.postMessage({ type: 'image', name: selected, ...m }),
@@ -195,7 +217,7 @@
   function openWithSolution(name, filter, sortByMarginal) {
     const info = report && report.symbols.find((x) => x.name === name);
     if (selected && selected !== name) save();
-    const st = Object.assign({}, stateOf(name) || {}, { solution: filter, columnFilters: [], page: 0, colPage: 0, view: 'list', sig: signatureOf(name) });
+    const st = Object.assign({}, stateOf(name) || defaultStateOf(name), { solution: filter, columnFilters: [], page: 0, colPage: 0, view: 'list', sig: signatureOf(name) });
     if (st.search && st.search.filterRows) st.search = { text: '' };
     if (sortByMarginal && info && info.marginalColumn !== undefined) Object.assign(st, { sortColumn: info.marginalColumn, sortDescending: true, sortAbsolute: true });
     states[name] = st;
@@ -633,7 +655,7 @@
       symbolActions,
     );
     exportCsvButton.hidden = dumpButton.hidden = codeButton.hidden = !!s.universe;
-    if (changed) table.reset(stateOf(name));
+    if (changed) table.reset(stateOf(name) || defaultStateOf(name));
     table.setDimension(s.dim);
     closeReport(false);
     table.query();
@@ -667,6 +689,14 @@
         break;
       case 'openExport':
         openExport();
+        break;
+      case 'viewDefaults':
+        // The settings changed: they apply to symbols shown from now on without a saved view.
+        if (file) file.viewDefaults = m.viewDefaults;
+        break;
+      case 'autoFit':
+        // GDX: Auto-Fit Columns (Ctrl+R).
+        if (!reportOpen) table.autoFit();
         break;
       case 'selectSymbol':
         // From a link in GAMS or Python source.

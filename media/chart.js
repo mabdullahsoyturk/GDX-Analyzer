@@ -152,6 +152,38 @@
     return mix(steps[i], steps[i + 1], x - i);
   }
 
+  /**
+   * The color of a value on a heatmap scale from min to max: a one-hue sequential ramp, or blue
+   * and red diverging from a gray 0 when the values have both signs.
+   */
+  function heatScale(min, max, pal) {
+    const diverging = min < 0 && max > 0;
+    const m = Math.max(Math.abs(min), Math.abs(max));
+    const color = diverging
+      ? (v) => (v < 0 ? mix(pal.neutral, pal.negative, Math.min(1, -v / m)) : mix(pal.neutral, pal.positive, Math.min(1, v / m)))
+      : (v) => ramp(pal.seq, max === min ? 1 : (v - min) / (max - min));
+    return { diverging, m, color };
+  }
+
+  const CELL_STEPS = 64;
+
+  /**
+   * The colors of table cells on a heatmap scale (like the heatmap chart), as
+   * `(v) => { background, color }` with a text color that contrasts with the background;
+   * ±Infinity take the ends of the scale. Colors are precomputed: tables color many cells.
+   */
+  function cellColors(min, max) {
+    const pal = palette();
+    const scale = heatScale(min, max, pal);
+    const lo = scale.diverging ? -scale.m : min;
+    const hi = scale.diverging ? scale.m : max;
+    const steps = Array.from({ length: CELL_STEPS + 1 }, (_, k) => {
+      const background = scale.color(lo + ((hi - lo) * k) / CELL_STEPS);
+      return { background, color: hexToLab(background)[0] > 0.62 ? '#1f1f1f' : '#ffffff' };
+    });
+    return (v) => steps[Math.round((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo) * CELL_STEPS)];
+  }
+
   // Tooltip ----------------------------------------------------------------------------
 
   function tooltip(root) {
@@ -370,11 +402,7 @@
     const all = rows.flatMap((r) => r.values.filter((v) => v !== null));
     const min = Math.min(...all);
     const max = Math.max(...all);
-    const diverging = min < 0 && max > 0;
-    const m = Math.max(Math.abs(min), Math.abs(max));
-    const color = diverging
-      ? (v) => (v < 0 ? mix(pal.neutral, pal.negative, -v / m) : mix(pal.neutral, pal.positive, v / m))
-      : (v) => ramp(pal.seq, max === min ? 1 : (v - min) / (max - min));
+    const { diverging, m, color } = heatScale(min, max, pal);
     const rowW = Math.max(40, Math.min(width * 0.3, Math.max(...rows.map((r) => measure(r.name, true))) + 8));
     const cw = Math.max(12, Math.min(48, Math.floor((width - rowW - 24) / cols.length)));
     const ch = 20;
@@ -651,5 +679,5 @@
   }
 
   // @ts-ignore
-  window.GdxChart = { render, toSvg, toPng };
+  window.GdxChart = { render, toSvg, toPng, cellColors };
 })();

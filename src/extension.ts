@@ -13,6 +13,7 @@ import { ScenarioPanel } from './scenarios';
 import { registerLinks } from './links';
 import { registerHovers } from './hovers';
 import { registerMcpServer } from './mcpProvider';
+import { postToActiveTable } from './tableHost';
 
 const LARGE_FILE_BYTES = 100 * 1024 * 1024;
 const GDX_FILTER = { 'GDX files': ['gdx'] };
@@ -404,6 +405,9 @@ export function activate(context: vscode.ExtensionContext) {
         await cfg.update('encoding', encoding, target);
       }),
     ),
+
+    // Like GAMS Studio's Ctrl+R: fit the columns of the active viewer or comparison to their content.
+    vscode.commands.registerCommand('gdxAnalyzer.autoFitColumns', () => postToActiveTable({ type: 'autoFit' })),
 
     vscode.commands.registerCommand(
       'gdxAnalyzer.showToolInfo',

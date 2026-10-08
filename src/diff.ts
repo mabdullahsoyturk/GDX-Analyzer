@@ -6,7 +6,7 @@ import { dumpUri } from './dump';
 import { DiffSummary, GdxSymbol, parseDiffOutput } from './parse';
 import { GdxService, errorMessage } from './service';
 import { TableView, cachedView, diffColumnTable } from './table';
-import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage } from './tableHost';
+import { CopyRequest, ImageMessage, PreferenceMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage, savePreference, trackTablePanel } from './tableHost';
 import { DiffOptions } from './tools';
 import { PROTOCOL, webviewHtml } from './webview';
 
@@ -28,6 +28,7 @@ type FromWebview =
   | CopyRequest
   | SelectionRequest
   | ImageMessage
+  | PreferenceMessage
   | { type: 'action'; action: 'textDiff'; name?: string }
   | { type: 'action'; action: 'rerun' | 'swap' | 'openDiffFile' | 'saveDiffFile' | 'open1' | 'open2' | 'cancel' | 'resetOptions' }
   | { type: 'options'; options: DiffOptions };
@@ -112,6 +113,7 @@ export class DiffPanel implements vscode.Disposable {
     this.selection = new SelectionTracker(service.selectionStatus, this.panel);
     this.disposables.push(
       this.selection,
+      trackTablePanel(this.panel),
       this.panel.onDidDispose(() => this.dispose()),
       this.panel.webview.onDidReceiveMessage((m: FromWebview) => this.onMessage(m)),
       vscode.workspace.onDidChangeConfiguration((e) => {
@@ -353,6 +355,8 @@ export class DiffPanel implements vscode.Disposable {
         const name = (f: string) => path.basename(f).replace(/\.gdx$/i, '');
         return saveChartImage(m, path.join(this.saveDir(), `${name(this.file1)}_vs_${name(this.file2)}_${m.name}`), (err) => this.service.showError('Saving the chart image failed', err));
       }
+      case 'preference':
+        return savePreference(m, (err) => this.service.showError('Saving the setting failed', err));
       case 'selection':
         // The difference view has no table view.
         return this.selection.update({ ...m, query: { ...m.query, view: 'list' } }, () => this.view(m.name));

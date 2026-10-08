@@ -11,7 +11,7 @@ import { GdxSymbol } from './parse';
 import { baseAfterRemoval, scenarioNames, scenarioTable } from './scenario';
 import { GdxService, errorMessage } from './service';
 import { TableView, cachedView } from './table';
-import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage } from './tableHost';
+import { CopyRequest, ImageMessage, PreferenceMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, pageSize, saveChartImage, savePreference, trackTablePanel } from './tableHost';
 import { PROTOCOL, webviewHtml } from './webview';
 
 type FromWebview =
@@ -21,6 +21,7 @@ type FromWebview =
   | CopyRequest
   | SelectionRequest
   | ImageMessage
+  | PreferenceMessage
   | { type: 'action'; action: 'setBase' | 'remove' | 'open'; index: number }
   | { type: 'action'; action: 'add' | 'refresh' };
 
@@ -70,6 +71,7 @@ export class ScenarioPanel implements vscode.Disposable {
     this.selection = new SelectionTracker(service.selectionStatus, this.panel);
     this.disposables.push(
       this.selection,
+      trackTablePanel(this.panel),
       this.panel.onDidDispose(() => this.dispose()),
       this.panel.webview.onDidReceiveMessage((m: FromWebview) => this.onMessage(m)),
       vscode.workspace.onDidChangeConfiguration((e) => {
@@ -209,6 +211,8 @@ export class ScenarioPanel implements vscode.Disposable {
         }
         return;
       }
+      case 'preference':
+        return savePreference(m, (err) => this.service.showError('Saving the setting failed', err));
       case 'selection':
         return this.selection.update(m, () => this.view(m.name));
       case 'copy':

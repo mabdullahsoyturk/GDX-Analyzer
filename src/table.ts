@@ -239,6 +239,8 @@ export interface PivotPage extends Paging {
   headers: string[][];
   /** Per shown column: the kind of its values. */
   cellKinds: ColumnKind[];
+  /** The value column of each pivot column of the page. */
+  cellColumns: number[];
   rows: { labels: string[]; cells: string[]; exact?: string[] }[];
   /** Number of pivot rows (combinations of the row dimensions). */
   rowCount: number;
@@ -250,6 +252,16 @@ export interface PivotPage extends Paging {
 }
 
 /** Statistics of one column over the rows of a selection (see TableView.stats). */
+/**
+ * The scale of the heatmap colors of a value column: its smallest and largest finite number
+ * (EPS counts as 0). Columns without two different numbers have none.
+ */
+export interface HeatScale {
+  column: number;
+  min: number;
+  max: number;
+}
+
 export interface ColumnStats {
   column: number;
   name: string;
@@ -1015,6 +1027,88 @@ export class TableView {
     return { rows: index.length, columns };
   }
 
+  /** Heatmap scales over all records, and over the last filtered records (by identity of their index). */
+  private readonly allScales = new Map<number, HeatScale | null>();
+  private filteredScales?: { index: Int32Array; scales: Map<number, HeatScale | null> };
+
+  /** The heatmap scales of value columns over all records, or over the rows matching `selection`. */
+  heatScales(columns: number[], selection?: RowSelection): HeatScale[] {
+    return this.scalesOver(columns, selection ? this.indexFor(selection) : undefined);
+  }
+
+  private scalesOver(columns: number[], index?: Int32Array): HeatScale[] {
+    let cache = this.allScales;
+    if (index) {
+      if (this.filteredScales?.index !== index) this.filteredScales = { index, scales: new Map() };
+      cache = this.filteredScales.scales;
+    }
+    return columns.flatMap((column) => {
+      if (this.table.columns[column]?.kind !== 'value') {
+        return [];
+      }
+      let scale = cache.get(column);
+      if (scale === undefined) {
+        const { values, special } = this.cells.numbers(column);
+        let min = Infinity;
+        let max = -Infinity;
+        const n = index ? index.length : this.cells.length;
+        for (let i = 0; i < n; i++) {
+          const r = index ? index[i] : i;
+          // Infinities, NA, UNDF, empty cells and texts are not part of the scale (NaN compares false).
+          const x = special[r] === Sp.None ? values[r] : special[r] === Sp.Eps ? 0 : NaN;
+          if (x < min) min = x;
+          if (x > max) max = x;
+        }
+        scale = min < max ? { column, min, max } : null;
+        cache.set(column, scale);
+      }
+      return scale ? [scale] : [];
+    });
+  }
+
+  /**
+   * The heatmap scales of the table view: over its records (all, or with `filtered` those
+   * matching the filters), or with aggregated dimensions over its aggregated cells (without totals).
+   */
+  pivotHeatScales(q: Omit<PivotQuery, 'page' | 'pageSize' | 'colPage' | 'colPageSize'>, filtered: boolean): HeatScale[] {
+    const p = this.pivotData({ ...q, pageSize: 1, colPageSize: 1 });
+    const numeric = p.valueColumns.filter((c) => this.table.columns[c].kind === 'value');
+    if (!p.aggDims.length) {
+      return this.scalesOver(numeric, filtered ? p.records : undefined);
+    }
+    if (!p.cellScales) {
+      const min = new Float64Array(numeric.length).fill(Infinity);
+      const max = new Float64Array(numeric.length).fill(-Infinity);
+      for (let r = 0; r < p.rowReps.length; r++) {
+        const groups = new Map<number, number[]>();
+        for (let k = p.rowStart[r]; k < p.rowStart[r + 1]; k++) {
+          const list = groups.get(p.rowRecordGroup[k]);
+          if (list) list.push(p.rowRecords[k]);
+          else groups.set(p.rowRecordGroup[k], [p.rowRecords[k]]);
+        }
+        for (const records of groups.values()) {
+          numeric.forEach((column, i) => {
+            const x = this.cellNumber(this.combine(p, records, column), column);
+            if (x < min[i]) min[i] = x;
+            if (x > max[i]) max[i] = x;
+          });
+        }
+      }
+      p.cellScales = numeric.flatMap((column, i) => (min[i] < max[i] ? [{ column, min: min[i], max: max[i] }] : []));
+    }
+    return p.cellScales;
+  }
+
+  /** The number of a pivot cell (EPS as 0); NaN for infinities, NA, UNDF and empty cells. */
+  private cellNumber(cell: PivotCell, column: number): number {
+    if (typeof cell === 'number') {
+      const { values, special } = this.cells.numbers(column);
+      return special[cell] === Sp.None ? values[cell] : special[cell] === Sp.Eps ? 0 : NaN;
+    }
+    // Aggregates are written like values ('Eps', '+Inf', 'NA', ...).
+    return cell === 'Eps' ? 0 : cell === '' ? NaN : Number(cell);
+  }
+
   /** Formats the cells of value columns (numbers) with the given number format. */
   private formatter(format: NumberFormat | undefined): (column: number, value: string) => string {
     const numeric = this.table.columns.map((c) => c.kind === 'value');
@@ -1561,6 +1655,7 @@ export class TableView {
       levels: p.levels,
       headers: cols.map((c) => this.columnLabels(p, c)),
       cellKinds: cols.map((c) => this.table.columns[this.pivotValueColumn(p, c)].kind),
+      cellColumns: cols.map((c) => this.pivotValueColumn(p, c)),
       aggDims: p.aggDims,
       aggregate: p.aggregate,
       totalRow: p.totalRow ? p.rowReps.length : undefined,
@@ -2034,6 +2129,8 @@ interface PivotData {
   /** Number of pivot rows, including the total row. */
   rowCount: number;
   filteredCount: number;
+  /** The heatmap scales of the aggregated cells, when first needed. */
+  cellScales?: HeatScale[];
 }
 
 /**

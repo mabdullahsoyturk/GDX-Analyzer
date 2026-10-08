@@ -4,7 +4,7 @@
  */
 import { NumberFormat, formatNumber, normalizeFormat } from './format';
 import { TextSearch, compileSearch, isSearchError } from './search';
-import { Aggregate, CellSelection, ChartData, ChartSpec, ColumnFilter, CopyResult, Hit, PivotPage, SelectionStats, SolutionFilter, SpecialValue, TablePage, TableView } from './table';
+import { Aggregate, CellSelection, ChartData, ChartSpec, ColumnFilter, CopyResult, HeatScale, Hit, PivotPage, SelectionStats, SolutionFilter, SpecialValue, TablePage, TableView } from './table';
 
 /** Table state sent by the webview with each query. */
 export interface WebviewQuery {
@@ -43,6 +43,9 @@ export interface WebviewQuery {
   format?: Partial<NumberFormat>;
   /** Hide variable/equation fields that have their default value in every record; the default applies if absent. */
   squeeze?: boolean;
+  /** List and table view: color the numbers by value, on the scale of all records or (`heatmapFiltered`) the filtered ones. */
+  heatmap?: boolean;
+  heatmapFiltered?: boolean;
 }
 
 export interface QuerySettings {
@@ -80,7 +83,15 @@ export interface SearchInfo {
 /** Chart data with the values also formatted in the number format of the view (null: no value). */
 export type ChartAnswer = ChartData & { series: (ChartData['series'][number] & { texts: (string | null)[] })[] };
 
-export type QueryAnswer = (TablePage | PivotPage | ChartAnswer) & { format: NumberFormat; search?: SearchInfo; squeeze: SqueezeInfo; solution: SolutionInfo; seq?: number };
+export type QueryAnswer = (TablePage | PivotPage | ChartAnswer) & {
+  format: NumberFormat;
+  search?: SearchInfo;
+  squeeze: SqueezeInfo;
+  solution: SolutionInfo;
+  /** With `heatmap`: the scales of the value columns shown. */
+  heat?: HeatScale[];
+  seq?: number;
+};
 
 export function isPivot(view: TableView, q: WebviewQuery): boolean {
   return q.view === 'table' && view.keyColumns.length > 0;
@@ -128,8 +139,15 @@ export function answerQuery(view: TableView, q: WebviewQuery, settings: QuerySet
   let offset = q.offset;
   let colPage = q.colPage;
   let search: SearchInfo | undefined;
-  const run = () =>
-    pivot ? view.pivot({ ...base, page, offset, colPage, pageSize: rows, colPageSize: cols }) : view.query({ ...base, page, offset, pageSize: rows });
+  const run = () => {
+    const result = pivot ? view.pivot({ ...base, page, offset, colPage, pageSize: rows, colPageSize: cols }) : view.query({ ...base, page, offset, pageSize: rows });
+    if (!q.heatmap) {
+      return result;
+    }
+    const filtered = !!q.heatmapFiltered;
+    const heat = result.kind === 'pivot' ? view.pivotHeatScales(base, filtered) : view.heatScales(result.columnIndex, filtered ? base : undefined);
+    return { ...result, heat };
+  };
 
   if (q.search?.text && !q.search.filterRows) {
     const found = pivot ? view.findPivot(base, q.search) : view.findList({ ...base, pageSize: rows }, q.search);

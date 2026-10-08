@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { GdxSymbol } from './parse';
 import { GdxFileInfo, GdxService, errorMessage } from './service';
 import { TableView, UNIVERSE, cachedView, columnTable, universeSymbol, universeTable } from './table';
-import { CopyRequest, ImageMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, defaultFormat, pageSize, saveChartImage, squeezeDefaults } from './tableHost';
+import { CopyRequest, ImageMessage, PreferenceMessage, SelectionRequest, SelectionTracker, WebviewQuery, answerColumnValues, answerQuery, copyToClipboard, defaultFormat, pageSize, saveChartImage, savePreference, squeezeDefaults, trackTablePanel } from './tableHost';
 import { ExportItem, ExportOptions, SymbolViewState, buildSheets, connectInstructions } from './export';
 import { ViewStateStore } from './viewState';
 import { writeXlsx } from './xlsx';
@@ -29,6 +29,7 @@ type FromWebview =
   | CopyRequest
   | SelectionRequest
   | ImageMessage
+  | PreferenceMessage
   | { type: 'action'; action: 'dumpSymbol' | 'exportCsv'; name: string }
   | { type: 'action'; action: 'refresh' | 'dumpAll' | 'compare' | 'settings' | 'showLog' };
 
@@ -70,6 +71,7 @@ class ViewerSession implements vscode.Disposable {
     );
     this.disposables.push(
       this.selection,
+      trackTablePanel(panel),
       watcher,
       watcher.onDidChange(() => this.scheduleReload()),
       watcher.onDidCreate(() => this.scheduleReload()),
@@ -85,6 +87,9 @@ class ViewerSession implements vscode.Disposable {
         }
         if (e.affectsConfiguration('gdxAnalyzer.encoding') || e.affectsConfiguration('gdxAnalyzer.useGamsTools')) {
           this.load();
+        }
+        if (e.affectsConfiguration('gdxAnalyzer.defaultView') || e.affectsConfiguration('gdxAnalyzer.defaultFields')) {
+          this.post({ type: 'viewDefaults', viewDefaults: viewDefaults() });
         }
       }),
     );
@@ -317,6 +322,7 @@ class ViewerSession implements vscode.Disposable {
         version: info.version,
         symbols: [universeSymbol(info.version), ...info.symbols],
         pageSize: pageSize(),
+        viewDefaults: viewDefaults(),
       });
       // A hidden webview does not receive it: it asks again ('ready') when shown.
       this.webviewHasFile = this.panel.visible;
@@ -444,6 +450,8 @@ class ViewerSession implements vscode.Disposable {
         return this.copyCode(m.name, m.language, m.target, m.state);
       case 'report':
         return this.sendReport(m.refresh);
+      case 'preference':
+        return savePreference(m, (err) => this.service.showError('Saving the setting failed', err));
       case 'image':
         return saveChartImage(m, `${this.savePath(path.basename(this.uri.fsPath)).replace(/\.gdx$/i, '')}_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
       case 'copy':
@@ -455,6 +463,18 @@ class ViewerSession implements vscode.Disposable {
         return;
     }
   }
+}
+
+/**
+ * How symbols are shown the first time (without a remembered view), from the settings
+ * gdxAnalyzer.defaultView and gdxAnalyzer.defaultFields (applied by media/viewer.js).
+ */
+function viewDefaults(): { view: 'list' | 'table'; fields: Record<string, boolean> } {
+  const cfg = vscode.workspace.getConfiguration('gdxAnalyzer');
+  return {
+    view: cfg.get<string>('defaultView', 'list') === 'table' ? 'table' : 'list',
+    fields: cfg.get<Record<string, boolean>>('defaultFields', {}) ?? {},
+  };
 }
 
 /** Setting gdxAnalyzer.rememberViewState. */

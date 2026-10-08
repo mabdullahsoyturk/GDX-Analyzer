@@ -127,6 +127,7 @@
     onCopy: (req) => selected && vscode.postMessage({ type: 'copy', name: selected, ...req }),
     onSelection: (req) => selected && vscode.postMessage({ type: 'selection', name: selected, ...req }),
     onImage: (m) => selected && vscode.postMessage({ type: 'image', name: selected, ...m }),
+    onPreference: (key, value) => vscode.postMessage({ type: 'preference', key, value }),
     imageInfo: () => {
       const e = result && result.entries.find((x) => x.name === selected);
       const base = (f) => f.split(/[\\/]/).pop();
@@ -323,6 +324,10 @@
         break;
       case 'requery':
         if (selected) table.query();
+        break;
+      case 'autoFit':
+        // GDX: Auto-Fit Columns (Ctrl+R).
+        table.autoFit();
         break;
       case 'columnValues':
         if (m.name === selected) table.showColumnValues(m);

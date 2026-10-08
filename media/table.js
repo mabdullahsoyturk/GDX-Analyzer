@@ -147,6 +147,8 @@
     const note = h('div', { class: 'muted small' });
     const search = h('input', { type: 'search', placeholder: 'Search labels…', 'aria-label': 'Search labels' });
     const hideUnselected = h('input', { type: 'checkbox' });
+    // Like GAMS Studio: the selected labels first (a setting, sent with the labels).
+    const selectedFirst = h('input', { type: 'checkbox' });
     const apply = h('button', { class: 'primary' }, 'Apply');
     let values = [];
     let truncated = false;
@@ -163,9 +165,10 @@
       apply.disabled = selected.size === 0;
     }
 
-    /** Rebuilds the list (after the listed labels changed). */
+    /** Rebuilds the list (after the listed labels or their order changed). */
     function render() {
       shown = hideUnselected.checked ? values.filter((v) => selected.has(v)) : values;
+      if (selectedFirst.checked) shown = [...shown.filter((v) => selected.has(v)), ...shown.filter((v) => !selected.has(v))];
       boxes = [];
       const items = shown.slice(0, MAX_LISTED_LABELS).map((v, i) => {
         const box = h('input', { type: 'checkbox' });
@@ -232,20 +235,31 @@
       table.closePopup();
     }
 
+    /** After the selection of many labels changed: the selected ones move to the top if they are listed first. */
+    function bulk() {
+      last = -1;
+      if (selectedFirst.checked) render();
+      else sync();
+    }
+
     // Like GAMS Studio: the search selects the matching labels and deselects all others.
     search.addEventListener(
       'input',
       debounce(() => {
         const needle = search.value.trim().toLowerCase();
         selected = new Set(values.filter((v) => !needle || v.toLowerCase().includes(needle)));
-        last = -1;
-        sync();
+        bulk();
       }, 150),
     );
     search.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && selected.size) commit();
     });
     hideUnselected.addEventListener('change', render);
+    selectedFirst.addEventListener('change', () => {
+      table.onPreference('labelFilter.selectedFirst', selectedFirst.checked);
+      last = -1;
+      render();
+    });
     apply.addEventListener('click', commit);
 
     const content = h(
@@ -253,13 +267,18 @@
       { class: 'filter-popup' },
       h('div', { class: 'popup-title' }, `Filter ${name}`),
       search,
-      h('label', { class: 'check' }, hideUnselected, 'Hide unselected'),
+      h(
+        'div',
+        { class: 'row wrap' },
+        h('label', { class: 'check' }, hideUnselected, 'Hide unselected'),
+        h('label', { class: 'check', title: 'List the selected labels before the others (setting gdxAnalyzer.labelFilter.selectedFirst)' }, selectedFirst, 'Selected first'),
+      ),
       h(
         'div',
         { class: 'row' },
-        h('button', { onclick: () => ((selected = new Set(values)), sync()) }, 'All'),
-        h('button', { onclick: () => ((selected = new Set(values.filter((v) => !selected.has(v)))), sync()) }, 'Invert'),
-        h('button', { onclick: () => ((selected = new Set()), sync()) }, 'None'),
+        h('button', { onclick: () => ((selected = new Set(values)), bulk()) }, 'All'),
+        h('button', { onclick: () => ((selected = new Set(values.filter((v) => !selected.has(v)))), bulk()) }, 'Invert'),
+        h('button', { onclick: () => ((selected = new Set()), bulk()) }, 'None'),
         counter,
       ),
       status,
@@ -281,6 +300,7 @@
       setValues(m) {
         values = m.values;
         truncated = m.truncated;
+        selectedFirst.checked = !!m.selectedFirst;
         if (!current) selected = new Set(values);
         else if (current.exclude) {
           const out = new Set(current.labels);
@@ -428,6 +448,77 @@
     return { content, focus: () => radios.find((l) => l.querySelector('input').checked).querySelector('input').focus() };
   }
 
+  /** Heatmap: colors the numbers by value (like GAMS Studio's); changes apply immediately. */
+  function heatmapContent(table) {
+    const p = table.lastPage;
+    // Aggregated cells are colored on the scale of the aggregated cells, which are of the filtered records.
+    const aggregated = !!p && p.kind === 'pivot' && p.aggDims.length > 0;
+    const on = h('input', { type: 'checkbox' });
+    on.checked = !!table.state.heatmap;
+    const filtered = h('input', { type: 'checkbox' });
+    filtered.checked = !!table.state.heatmapFiltered;
+    const filteredLabel = h(
+      'label',
+      { class: 'check', title: 'The scale goes from the smallest to the largest number of the records that pass the filters, instead of all records' },
+      filtered,
+      'Scale of the filtered records',
+    );
+    const sync = () => {
+      filtered.disabled = !on.checked || aggregated;
+      filteredLabel.classList.toggle('disabled', filtered.disabled);
+    };
+    const apply = () => {
+      sync();
+      table.setHeatmap(on.checked, filtered.checked);
+    };
+    on.addEventListener('change', apply);
+    filtered.addEventListener('change', apply);
+    sync();
+    const content = h(
+      'div',
+      { class: 'filter-popup' },
+      h('div', { class: 'popup-title' }, 'Heatmap'),
+      h('label', { class: 'check' }, on, 'Color the numbers by value'),
+      filteredLabel,
+      h(
+        'div',
+        { class: 'muted small' },
+        'Each field has its own scale: blue from small to large values, or red (negative) to blue (positive) through gray at 0 if it has both signs. EPS counts as 0; NA, UNDF, totals and fields with a single value are not colored.',
+      ),
+      aggregated ? h('div', { class: 'muted small' }, 'Aggregated cells are colored on the scale of all aggregated cells.') : null,
+    );
+    return { content, focus: () => on.focus() };
+  }
+
+  /** The number of a cell for the heatmap (EPS as 0, infinities at the ends of the scale); NaN if it has none. */
+  function heatValue(text) {
+    switch (text.toLowerCase()) {
+      case '':
+      case 'na':
+      case 'undf':
+        return NaN;
+      case 'eps':
+        return 0;
+      case '+inf':
+      case 'inf':
+        return Infinity;
+      case '-inf':
+        return -Infinity;
+      default:
+        return Number(text);
+    }
+  }
+
+  /** Colors a table cell on a heatmap scale (a function of cellColors in media/chart.js). */
+  function paintHeat(td, colors, text) {
+    const x = heatValue(text);
+    if (!colors || Number.isNaN(x)) return;
+    const c = colors(x);
+    td.classList.add('heat');
+    td.style.setProperty('--heat', c.background);
+    td.style.setProperty('--heat-fg', c.color);
+  }
+
   /** Names and descriptions of the solution filters (SolutionFilter of src/table.ts). */
   const SOLUTION_FILTERS = {
     marginal: ['Non-zero marginal', 'The marginal is non-zero or EPS: binding constraints and nonbasic variables'],
@@ -568,6 +659,9 @@
     order: undefined,
     /** Chart view: { type, x, series, value } (see ChartSpec in src/table.ts); the host's defaults if undefined. */
     chart: undefined,
+    /** List and table view: color the numbers by value, on the scale of all records or the filtered ones. */
+    heatmap: false,
+    heatmapFiltered: false,
   });
 
   /**
@@ -577,7 +671,7 @@
    */
   class GdxTable {
     /**
-     * @param {{ onQuery: (q: any) => void, onColumnValues: (column: number) => void, onCopy: (req: any) => void, onSelection?: (req: any) => void, onImage?: (m: any) => void, imageInfo?: () => { title: string, file: string }, tools?: Node[], filterPlaceholder?: string, pivot?: boolean, chart?: boolean }} options
+     * @param {{ onQuery: (q: any) => void, onColumnValues: (column: number) => void, onCopy: (req: any) => void, onSelection?: (req: any) => void, onImage?: (m: any) => void, onPreference?: (key: string, value: any) => void, defaultState?: () => any, imageInfo?: () => { title: string, file: string }, tools?: Node[], filterPlaceholder?: string, pivot?: boolean, chart?: boolean }} options
      */
     constructor(options) {
       this.onQuery = options.onQuery;
@@ -590,6 +684,10 @@
       }, 150);
       /** Called when the state changed without a query (e.g. column widths). */
       this.onStateChange = options.onStateChange || (() => {});
+      /** Called with a choice kept as a setting (e.g. "Selected first" of the label filter). */
+      this.onPreference = options.onPreference || (() => {});
+      /** The view that Reset returns to, on top of DEFAULT_STATE (e.g. from the settings). */
+      this.defaultState = options.defaultState || (() => ({}));
       this.lastPage = null;
       this.suppressClickUntil = 0;
       /** Selected cells: { anchor: {r, c}, focus: {r, c} } in positions of the whole view, { all: true }, or null. */
@@ -668,6 +766,7 @@
       this.solutionButton = h('button', { title: 'Show records by solution status: binding, at a bound, infeasible, non-default', onclick: () => this.openSolution() }, 'Solution ▾');
       this.fieldsButton = h('button', { title: 'Choose the fields to show', onclick: () => this.openFields() }, 'Fields ▾');
       this.formatButton = h('button', { title: 'Number format and precision', onclick: () => this.openFormat() }, 'Format ▾');
+      this.heatmapButton = h('button', { title: 'Color the numbers by value', onclick: () => this.openHeatmap() }, 'Heatmap ▾');
       this.clearButton = h('button', { title: 'Remove all column filters', onclick: () => this.clearFilters() }, 'Clear filters');
       this.resetButton = h('button', { title: 'Reset filters, sorting, fields and layout', onclick: () => this.resetView() }, 'Reset');
       this.chipBar = h('div', { class: 'chipbar' });
@@ -688,6 +787,7 @@
           this.solutionButton,
           this.fieldsButton,
           this.formatButton,
+          this.heatmapButton,
           this.clearButton,
           this.resetButton,
           ...(options.tools || []),
@@ -719,7 +819,11 @@
         }
         this.onScroll();
       }).observe(this.scroll);
-      new MutationObserver(redraw).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      // Heatmap colors also depend on the theme.
+      new MutationObserver(() => {
+        redraw();
+        if (this.state.heatmap && this.lastPage && this.lastPage.kind !== 'chart') this.rerender();
+      }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     }
 
     // Cell selection and copying ----------------------------------------------
@@ -967,7 +1071,7 @@
         pivot ? item('Copy without labels (comma-separated)', '', () => this.copy('comma', false)) : null,
         h('div', { class: 'menu-sep', role: 'separator' }),
         item('Select all', 'Ctrl+A', () => this.selectAll()),
-        item('Auto-fit columns', '', () => this.autoFit()),
+        item('Auto-fit columns', 'Ctrl+R', () => this.autoFit()),
       ].filter(Boolean);
       const menu = h('div', { class: 'menu', role: 'menu' }, ...items);
       menu.addEventListener('keydown', (e) => {
@@ -1110,8 +1214,10 @@
       return th;
     }
 
-    /** Fits all columns to their content again. */
+    /** Fits all columns to the content of the rows shown (without widths set by the user or seen while scrolling). */
     autoFit() {
+      if (!this.lastPage || this.lastPage.kind === 'chart') return;
+      this.seenWidths = {};
       this.state.colWidths = {};
       this.onStateChange();
       this.rerender();
@@ -1412,7 +1518,7 @@
 
     resetView() {
       const keepSearch = this.state.search;
-      this.state = Object.assign(DEFAULT_STATE(), { search: keepSearch });
+      this.state = Object.assign(DEFAULT_STATE(), this.defaultState(), { search: keepSearch });
       this.query();
     }
 
@@ -1459,6 +1565,27 @@
       this.closePopup();
       this.popup = openPopup(this.formatButton, view.content, { label: 'Number format' });
       view.focus();
+    }
+
+    setHeatmap(on, filtered) {
+      this.state.heatmap = on;
+      this.state.heatmapFiltered = filtered;
+      this.query();
+    }
+
+    openHeatmap() {
+      const view = heatmapContent(this);
+      this.closePopup();
+      this.popup = openPopup(this.heatmapButton, view.content, { label: 'Heatmap' });
+      view.focus();
+    }
+
+    /** The heatmap colors of the value columns of a page (column index → cellColors), or null. */
+    heatColors(p) {
+      // @ts-ignore
+      const chart = window.GdxChart;
+      if (!this.state.heatmap || !p.heat || !chart) return null;
+      return new Map(p.heat.map((s) => [s.column, chart.cellColors(s.min, s.max)]));
     }
 
     openFields() {
@@ -1539,6 +1666,9 @@
       this.fieldsButton.hidden = view === 'chart' || this.columns.filter((_, i) => this.isValueColumn(i)).length < 2;
       this.formatButton.hidden = !this.columns.some((c) => c.kind === 'value');
       this.formatButton.classList.toggle('active', !!this.state.format);
+      this.heatmapButton.hidden = view === 'chart' || !this.columns.some((c) => c.kind === 'value');
+      this.heatmapButton.classList.toggle('active', !!this.state.heatmap);
+      this.el.classList.toggle('heatmap', !!this.state.heatmap && view !== 'chart');
       const solution = this.solutionInfo.active;
       this.solutionButton.hidden = !this.solutionInfo.filters.length;
       this.solutionButton.classList.toggle('active', !!solution);
@@ -1670,6 +1800,7 @@
       const top = this.spacer(p.columnIndex.length + 1, 0);
       const bottom = this.spacer(p.columnIndex.length + 1, 0);
       body.append(top);
+      const heat = this.heatColors(p);
       p.rows.forEach((row, r) => {
         const marks = new Set(row.marks || []);
         const abs = p.offset + r;
@@ -1681,6 +1812,7 @@
           if (marks.has(i)) cls += ' mark';
           if (c.side) cls += ' side' + c.side;
           const td = h('td', { class: cls, title: exactTitle(row, i), dataset: { r: String(abs), c: String(i) } }, v);
+          if (heat && c.kind === 'value') paintHeat(td, heat.get(p.columnIndex[i]), row.exact ? row.exact[i] : v);
           this.cellMap.set(abs + ',' + i, td);
           tr.append(td);
         });
@@ -2064,6 +2196,7 @@
       const top = this.spacer(spanCols, 0);
       const bottom = this.spacer(spanCols, 0);
       body.append(top);
+      const heat = this.heatColors(p);
       let prev = null;
       p.rows.forEach((row, ri) => {
         const abs = p.offset + ri;
@@ -2085,8 +2218,11 @@
           if (v === '') cls += ' none';
           else if (cls === 'value' && SPECIAL.has(v.toLowerCase())) cls += ' special';
           const c = p.colOffset + i;
+          const total = abs === p.totalRow || (p.totalColumns !== undefined && c >= p.totalColumns);
           if (p.totalColumns !== undefined && c >= p.totalColumns) cls += ' total';
           const td = h('td', { class: cls, title: exactTitle(row, i), dataset: { r: String(abs), c: String(c) } }, v);
+          // Totals are not part of the scale.
+          if (heat && !total && p.cellKinds[i] === 'value') paintHeat(td, heat.get(p.cellColumns[i]), row.exact ? row.exact[i] : v);
           this.cellMap.set(abs + ',' + c, td);
           tr.append(td);
         });

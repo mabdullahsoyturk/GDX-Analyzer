@@ -150,6 +150,11 @@
         "command": "gdxAnalyzer.showToolInfo",
         "title": "Show Tool Information",
         "category": "GDX"
+      },
+      {
+        "command": "gdxAnalyzer.autoFitColumns",
+        "title": "Auto-Fit Columns",
+        "category": "GDX"
       }
     ],
     "menus": {
@@ -259,9 +264,21 @@
         {
           "command": "gdxAnalyzer.showSymbol",
           "when": "editorLangId == gams || editorLangId == python"
+        },
+        {
+          "command": "gdxAnalyzer.autoFitColumns",
+          "when": "activeCustomEditorId == gdxAnalyzer.viewer || activeWebviewPanelId == gdxAnalyzer.diff || activeWebviewPanelId == gdxAnalyzer.scenarios"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "gdxAnalyzer.autoFitColumns",
+        "key": "ctrl+r",
+        "mac": "cmd+r",
+        "when": "(activeCustomEditorId == gdxAnalyzer.viewer || activeWebviewPanelId == gdxAnalyzer.diff || activeWebviewPanelId == gdxAnalyzer.scenarios) && !inQuickOpen && !sideBarFocus && !panelFocus && !auxiliaryBarFocus"
+      }
+    ],
     "configuration": {
       "title": "GDX Analyzer",
       "properties": {
@@ -374,6 +391,58 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Hide the fields of variables and equations (level, marginal, bounds, scale) that have their default value in every record. Can be changed per symbol with *Fields*."
+        },
+        "gdxAnalyzer.defaultView": {
+          "type": "string",
+          "enum": [
+            "list",
+            "table"
+          ],
+          "enumDescriptions": [
+            "One row per record.",
+            "Rows and columns by dimension (symbols with at least two dimensions; others are shown as a list)."
+          ],
+          "default": "list",
+          "markdownDescription": "View in which a symbol is shown the first time (when no view of it is remembered) and after *Reset*."
+        },
+        "gdxAnalyzer.defaultFields": {
+          "type": "object",
+          "properties": {
+            "Level": {
+              "type": "boolean",
+              "default": true
+            },
+            "Marginal": {
+              "type": "boolean",
+              "default": true
+            },
+            "Lower": {
+              "type": "boolean",
+              "default": true
+            },
+            "Upper": {
+              "type": "boolean",
+              "default": true
+            },
+            "Scale": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "Level": true,
+            "Marginal": true,
+            "Lower": true,
+            "Upper": true,
+            "Scale": true
+          },
+          "markdownDescription": "Fields of variables and equations shown when a symbol is shown the first time (when no view of it is remembered) and after *Reset*. Can be changed per symbol with *Fields*; if none is chosen, all are shown."
+        },
+        "gdxAnalyzer.labelFilter.selectedFirst": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "List the selected labels before the others in the label filter of a column, which helps with many labels. Also changed with *Selected first* in the filter."
         },
         "gdxAnalyzer.copy.decimalSeparator": {
           "type": "string",

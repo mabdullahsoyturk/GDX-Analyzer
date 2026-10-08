@@ -1043,6 +1043,12 @@ button.toggle[aria-pressed='true'] svg {
   color: inherit;
 }
 
+/* Heatmap: selected cells and search matches keep their own colors. */
+.gdx-table.heatmap tbody td.heat:not(.sel):not(.hit):not(.hit-cur) {
+  background: var(--heat);
+  color: var(--heat-fg);
+}
+
 /* The hidden attribute must win over display: flex. */
 .sym[hidden],
 .groupbox[hidden] {

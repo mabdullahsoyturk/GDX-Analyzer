@@ -24,8 +24,11 @@ text and CSV by the extension itself, so no GAMS installation is needed. See the
   mean, min, max or count, and add a total row and total columns with *Totals*. Columns without any value are left
   out of the table view.
 - **Built for large symbols.** Records load while you scroll, so symbols with millions of records stay responsive.
-- **Filters and search.** Filter labels from a checklist and numbers by range and special value. Search with
-  wildcards, exact match or regular expressions, then jump between matches or show only matching rows.
+- **Filters and search.** Filter labels from a checklist (optionally with the selected labels first) and numbers by
+  range and special value. Search with wildcards, exact match or regular expressions, then jump between matches or
+  show only matching rows.
+- **Heatmap.** Color the numbers of the list and table view by value, on the scale of all records or of the
+  filtered ones; each field has its own scale.
 - **Solution status.** For variables and equations, show only the records with a non-zero marginal (binding
   constraints), a level at its lower or upper bound, a level outside its bounds (infeasible), or a field that is not at
   its default. Each choice shows how many records it matches.
@@ -33,10 +36,11 @@ text and CSV by the extension itself, so no GAMS installation is needed. See the
   precision); sorting, filters and copies always use the exact values. A third click on the header of a number
   column sorts by magnitude, largest first.
 - **Selection and copy.** Select cells, rows or columns and press Ctrl+C to paste them into Excel. The status bar
-  shows the sum, average and count of the selection.
+  shows the sum, average and count of the selection. Ctrl+R fits the columns to their content.
 - **Files of other file systems,** such as Git revisions, open through a temporary copy.
 - **Remembers your view** of every symbol (filters, sorting, layout, format, column widths) and reloads when the
-  file changes, e.g. after a GAMS run.
+  file changes, e.g. after a GAMS run. Symbols shown for the first time open in the view and with the fields of
+  variables and equations chosen in the settings.
 
 ### Solution report
 
@@ -158,6 +162,7 @@ menu and the viewer.
 | Dump to Text / Dump Symbol to Text | Open the gdxdump output of a file or symbol |
 | Select Encoding of Labels… | Read labels and texts in another encoding (e.g. Latin-1) |
 | Reset Viewer State | Forget the saved view of a file |
+| Auto-Fit Columns (Ctrl+R) | Fit the columns of the viewer or a comparison to their content |
 | Copy MCP Server Configuration for AI Agents… | Connect external AI agents |
 | Show Tool Information | Show which gdxdump and gdxdiff are used |
 
@@ -172,6 +177,9 @@ menu and the viewer.
 | `gdxAnalyzer.encoding` | `utf-8` | Encoding of labels and texts, e.g. `windows-1252` |
 | `gdxAnalyzer.numberFormat.*` | `g`, 6 digits | Default number format: style, precision, full precision, trailing zeros |
 | `gdxAnalyzer.squeezeDefaults` | `false` | Hide variable and equation fields that have their default value in every record |
+| `gdxAnalyzer.defaultView` | `list` | View of symbols shown for the first time: `list` or `table` (two or more dimensions) |
+| `gdxAnalyzer.defaultFields` | all | Fields of variables and equations shown for the first time: level, marginal, lower, upper, scale |
+| `gdxAnalyzer.labelFilter.selectedFirst` | `false` | List the selected labels first in label filters |
 | `gdxAnalyzer.rememberViewState` | `true` | Remember the view of each file after it is closed |
 | `gdxAnalyzer.copy.decimalSeparator` | `period` | Decimal separator of copied numbers: `period`, `system` or `custom` |
 | `gdxAnalyzer.links.enabled` | `true` | Links from GDX file and symbol names in GAMS and Python source to the viewer |

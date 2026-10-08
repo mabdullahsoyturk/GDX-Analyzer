@@ -47,6 +47,7 @@
     onSelection: (req) => selected && vscode.postMessage({ type: 'selection', name: selected, ...req }),
     onStateChange: () => save(),
     onImage: (m) => selected && vscode.postMessage({ type: 'image', name: selected, ...m }),
+    onPreference: (key, value) => vscode.postMessage({ type: 'preference', key, value }),
     imageInfo: () => {
       const s = symbolOf(selected);
       return { title: s ? signature(s) + (s.text ? ': ' + s.text : '') : selected || '', file: data ? data.files.map((f) => f.name).join(' · ') : '' };
@@ -205,6 +206,10 @@
         break;
       case 'requery':
         if (selected) table.query();
+        break;
+      case 'autoFit':
+        // GDX: Auto-Fit Columns (Ctrl+R).
+        table.autoFit();
         break;
       case 'columnValues':
         if (m.name === selected) table.showColumnValues(m);
