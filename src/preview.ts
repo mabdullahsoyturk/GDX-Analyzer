@@ -8,7 +8,7 @@
 import { numberText } from './columns';
 import { NumberFormat, formatNumber } from './format';
 import type { GdxFileInfo } from './gdxFile';
-import { typeLabel } from './gdxQuery';
+import { typeLabel } from './parse';
 import type { GdxSymbol } from './parse';
 import { ColumnStats, SolutionFilter, TableView, UNIVERSE } from './table';
 

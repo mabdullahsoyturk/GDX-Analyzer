@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0
 
 ### Added
 
@@ -13,6 +13,11 @@
   change, for one repository (`.gitattributes`) or all of them. It needs neither GAMS nor GAMSPy and keeps working
   after updates of the extension. Files that are not GDX files (e.g. Git LFS pointers) are shown as they are.
 - **Command line:** `node out/cli.js dump <file> [<symbol>] [--csv]` writes the text of gdxdump without GAMS.
+- **VS Code for the Web (vscode.dev, github.dev):** the extension runs in the browser too. GDX files of any file
+  system (e.g. a repository opened on github.dev) open in the viewer, with the solution report, comparisons of files
+  and scenarios, charts, the exports, Create GDX from CSV/Excel, and links and hover previews in GAMS and Python
+  source. Files are read whole into memory there. The MCP server, gdxdump/gdxdiff, Compare with Git Revision and the
+  Git diff setup are desktop only (their commands are hidden in the browser).
 
 ## 0.10.1
 

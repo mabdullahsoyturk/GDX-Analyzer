@@ -6,3 +6,5 @@ out/
 # gdxdump and gdxdiff for the tests (scripts/fetch-gdx-tools.py).
 tools/
 dist/
+out-web/
+.vscode-test-web/

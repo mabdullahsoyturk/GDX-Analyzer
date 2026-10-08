@@ -1,8 +1,9 @@
-import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { dumpUri } from './dump';
+import { fileOf, uriIn } from './locations';
+import { copyFile, fileExists, isWithin, listDirectory, makeDirectory, remove, statFile } from './platform/files';
+import { defaultDirectory, displayFile, fileUri } from './platform/uris';
 import { DiffSummary, GdxSymbol, parseDiffOutput } from './parse';
 import { GdxService, errorMessage } from './service';
 import { TableView, cachedView, diffColumnTable } from './table';
@@ -47,15 +48,15 @@ export function diffOptionsFromSettings(): DiffOptions {
 }
 
 /** Removes the files of earlier sessions in a directory of the storage (difference files, copies of files). */
-export async function cleanupDiffStorage(storage: vscode.Uri, sub = 'diffs') {
-  const dir = path.join(storage.fsPath, sub);
+export async function cleanupDiffStorage(storage: string, sub = 'diffs') {
+  const dir = path.join(storage, sub);
   const cutoff = Date.now() - 24 * 3600 * 1000;
   try {
-    for (const name of await fs.promises.readdir(dir)) {
+    for (const name of await listDirectory(dir)) {
       const p = path.join(dir, name);
-      const stat = await fs.promises.stat(p);
+      const stat = await statFile(p);
       if (stat.mtimeMs < cutoff) {
-        await fs.promises.rm(p, { recursive: true, force: true });
+        await remove(p);
       }
     }
   } catch {
@@ -83,7 +84,7 @@ export class DiffPanel implements vscode.Disposable {
    * Shows the comparison of two files (reusing an open one). `labels`: how to show files
    * by path, e.g. a Git revision written to a temporary file.
    */
-  static show(extensionUri: vscode.Uri, storage: vscode.Uri, service: GdxService, file1: string, file2: string, labels?: Record<string, string>) {
+  static show(extensionUri: vscode.Uri, storage: string, service: GdxService, file1: string, file2: string, labels?: Record<string, string>) {
     for (const p of DiffPanel.panels) {
       if (p.file1 === file1 && p.file2 === file2) {
         p.panel.reveal();
@@ -96,13 +97,14 @@ export class DiffPanel implements vscode.Disposable {
 
   private constructor(
     extensionUri: vscode.Uri,
-    private readonly storage: vscode.Uri,
+    /** The directory of the extension's storage (where the difference file is written). */
+    private readonly storage: string,
     private readonly service: GdxService,
     private file1: string,
     private file2: string,
     private readonly labels: Record<string, string>,
   ) {
-    this.workDir = path.join(storage.fsPath, 'diffs', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    this.workDir = path.join(storage, 'diffs', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     this.diffFile = path.join(this.workDir, 'diff.gdx');
     this.panel = vscode.window.createWebviewPanel('gdxAnalyzer.diff', this.title(), vscode.ViewColumn.Active, {
       enableScripts: true,
@@ -134,12 +136,12 @@ export class DiffPanel implements vscode.Disposable {
     this.abort?.abort();
     DiffPanel.panels.delete(this);
     this.disposables.forEach((d) => d.dispose());
-    fs.promises.rm(this.workDir, { recursive: true, force: true }).catch(() => {});
+    remove(this.workDir).catch(() => {});
   }
 
   /** How a compared file is shown: its path, or its label. */
   private display(file: string): string {
-    return this.labels[file] ?? file;
+    return this.labels[file] ?? displayFile(file);
   }
 
   /** The short name of a compared file: its name, and what its label adds to the path (e.g. "out.gdx @ origin/main"). */
@@ -154,9 +156,9 @@ export class DiffPanel implements vscode.Disposable {
   }
 
   /** Where files saved from the comparison go by default: next to a compared file that is not a temporary copy. */
-  private saveDir(): string {
-    const own = [this.file1, this.file2].find((f) => !path.resolve(f).startsWith(path.resolve(this.storage.fsPath) + path.sep));
-    return own ? path.dirname(own) : (vscode.workspace.workspaceFolders?.find((f) => f.uri.scheme === 'file')?.uri.fsPath ?? os.homedir());
+  private saveDir(): string | undefined {
+    const own = [this.file1, this.file2].find((f) => !isWithin(f, this.storage));
+    return own ? path.dirname(own) : defaultDirectory();
   }
 
   private post(message: unknown) {
@@ -173,8 +175,8 @@ export class DiffPanel implements vscode.Disposable {
     const options = this.options ?? diffOptionsFromSettings();
     this.post({ type: 'running', file1: this.display(this.file1), file2: this.display(this.file2), options });
     try {
-      await fs.promises.mkdir(this.workDir, { recursive: true });
-      await fs.promises.rm(this.diffFile, { force: true });
+      await makeDirectory(this.workDir);
+      await remove(this.diffFile);
       const [result, symbols1, symbols2] = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: 'Comparing GDX files' },
         () =>
@@ -186,7 +188,7 @@ export class DiffPanel implements vscode.Disposable {
       );
       const summary = parseDiffOutput(result.stdout);
       const diffSymbols =
-        result.exitCode === 1 && fs.existsSync(this.diffFile) ? await this.service.loadSymbolList(this.diffFile) : [];
+        result.exitCode === 1 && (await fileExists(this.diffFile)) ? await this.service.loadSymbolList(this.diffFile) : [];
       if (gen !== this.generation) {
         return;
       }
@@ -319,19 +321,19 @@ export class DiffPanel implements vscode.Disposable {
             this.domainCache = undefined;
             return this.run();
           case 'open1':
-            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.file1), 'gdxAnalyzer.viewer');
+            return vscode.commands.executeCommand('vscode.openWith', fileUri(this.file1), 'gdxAnalyzer.viewer');
           case 'open2':
-            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.file2), 'gdxAnalyzer.viewer');
+            return vscode.commands.executeCommand('vscode.openWith', fileUri(this.file2), 'gdxAnalyzer.viewer');
           case 'openDiffFile':
-            return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.diffFile), 'gdxAnalyzer.viewer');
+            return vscode.commands.executeCommand('vscode.openWith', fileUri(this.diffFile), 'gdxAnalyzer.viewer');
           case 'saveDiffFile': {
             const target = await vscode.window.showSaveDialog({
-              defaultUri: vscode.Uri.file(path.join(this.saveDir(), 'diff.gdx')),
+              defaultUri: uriIn(this.saveDir(), 'diff.gdx'),
               filters: { 'GDX files': ['gdx'] },
             });
             if (target) {
               try {
-                await fs.promises.copyFile(this.diffFile, target.fsPath);
+                await copyFile(this.diffFile, fileOf(target));
               } catch (err) {
                 this.service.showError('Saving the difference file failed', err);
               }
@@ -353,7 +355,7 @@ export class DiffPanel implements vscode.Disposable {
         return;
       case 'image': {
         const name = (f: string) => path.basename(f).replace(/\.gdx$/i, '');
-        return saveChartImage(m, path.join(this.saveDir(), `${name(this.file1)}_vs_${name(this.file2)}_${m.name}`), (err) => this.service.showError('Saving the chart image failed', err));
+        return saveChartImage(m, this.saveDir(), `${name(this.file1)}_vs_${name(this.file2)}_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
       }
       case 'preference':
         return savePreference(m, (err) => this.service.showError('Saving the setting failed', err));

@@ -1,5 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { watchFile } from './locations';
+import { fileUri } from './platform/uris';
 import { GdxService, errorMessage } from './service';
 
 export const DUMP_SCHEME = 'gdxdump';
@@ -17,7 +19,7 @@ export function dumpUri(file: string, symbol?: string): vscode.Uri {
   // The directory keeps equally named files from different folders apart in the tab titles' tooltips.
   return vscode.Uri.from({
     scheme: DUMP_SCHEME,
-    path: `${vscode.Uri.file(path.dirname(file)).path}/${label}`,
+    path: `${fileUri(path.dirname(file)).path.replace(/\/$/, '')}/${label}`,
     query: JSON.stringify(target),
   });
 }
@@ -72,9 +74,7 @@ export class GdxDumpProvider implements vscode.TextDocumentContentProvider, vsco
     if (this.watchers.has(file)) {
       return;
     }
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(path.dirname(file)), path.basename(file)),
-    );
+    const watcher = watchFile(file);
     let timer: NodeJS.Timeout | undefined;
     const refresh = () => {
       clearTimeout(timer);

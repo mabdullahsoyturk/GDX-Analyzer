@@ -1,19 +1,18 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { DiffPanel, cleanupDiffStorage } from './diff';
 import { DUMP_SCHEME, GdxDumpProvider, dumpUri } from './dump';
 import { GdxSymbol } from './parse';
 import { GdxService, describeTools } from './service';
-import { textDecoder } from './tools';
+import { textDecoder } from './encoding';
 import { ViewStateStore } from './viewState';
 import { GdxViewerProvider } from './viewer';
-import { registerGitCompare } from './gitCompare';
-import { registerGitDiffSetup } from './gitDiffSetup';
 import { ScenarioPanel } from './scenarios';
 import { registerLinks } from './links';
 import { registerHovers } from './hovers';
-import { registerMcpServer } from './mcpProvider';
+import { baseName, fileOf, storageDirectory } from './locations';
+import { registerNodeFeatures } from './nodeFeatures';
+import { statFile } from './platform/files';
+import { fileKey, fileUri } from './platform/uris';
 import { postToActiveTable } from './tableHost';
 import { createGdxFromTable } from './importCommand';
 
@@ -47,26 +46,21 @@ function isKnownEncoding(label: string): boolean {
 
 export function activate(context: vscode.ExtensionContext) {
   const service = new GdxService();
-  const viewer = new GdxViewerProvider(context.extensionUri, service, new ViewStateStore(context.globalState), context.globalStorageUri);
+  const storage = storageDirectory(context);
+  const viewer = new GdxViewerProvider(context.extensionUri, service, new ViewStateStore(context.globalState), storage);
   const dumps = new GdxDumpProvider(service);
   let selectedForCompare: vscode.Uri | undefined;
 
-  for (const sub of ['diffs', 'copies', 'revisions']) cleanupDiffStorage(context.globalStorageUri, sub);
-  registerMcpServer(context, service);
+  for (const sub of ['diffs', 'copies', 'revisions']) cleanupDiffStorage(storage, sub);
   registerLinks(context, (uri, symbol) => guarded('Opening the GDX file failed', showInViewer)(uri, symbol), hasSymbol);
   registerHovers(context, service);
-  registerGitCompare(
-    context,
-    () => currentGdx(),
-    (file1, file2, labels) => DiffPanel.show(context.extensionUri, context.globalStorageUri, service, file1, file2, labels),
-    (err) => service.showError('Comparing with the Git revision failed', err),
-  );
-  registerGitDiffSetup(context, () => currentGdx(), (err) => service.showError('Setting up git diff for GDX files failed', err));
+  // The MCP server, Git revisions and git diff (not in the web extension).
+  registerNodeFeatures(context, service, () => currentGdx(), (file1, file2, labels) => DiffPanel.show(context.extensionUri, storage, service, file1, file2, labels));
 
   /** The GDX file a command applies to: its argument, the active viewer or the active dump document. */
   function currentGdx(arg?: unknown): vscode.Uri | undefined {
     if (arg instanceof vscode.Uri) {
-      return arg.scheme === DUMP_SCHEME ? vscode.Uri.file(JSON.parse(arg.query).file) : arg;
+      return arg.scheme === DUMP_SCHEME ? fileUri(JSON.parse(arg.query).file) : arg;
     }
     const active = viewer.active();
     if (active) {
@@ -74,9 +68,9 @@ export function activate(context: vscode.ExtensionContext) {
     }
     const doc = vscode.window.activeTextEditor?.document.uri;
     if (doc?.scheme === DUMP_SCHEME) {
-      return vscode.Uri.file(JSON.parse(doc.query).file);
+      return fileUri(JSON.parse(doc.query).file);
     }
-    if (doc?.scheme === 'file' && doc.fsPath.toLowerCase().endsWith('.gdx')) {
+    if (doc && fileKey(doc) !== undefined && doc.path.toLowerCase().endsWith('.gdx')) {
       return doc;
     }
     return undefined;
@@ -87,7 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
       title,
       canSelectMany: false,
       filters: GDX_FILTER,
-      defaultUri: near ? vscode.Uri.file(path.dirname(near.fsPath)) : vscode.workspace.workspaceFolders?.[0]?.uri,
+      defaultUri: near ? vscode.Uri.joinPath(near, '..') : vscode.workspace.workspaceFolders?.[0]?.uri,
     });
     return picked?.[0];
   }
@@ -118,7 +112,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (session && session.symbols.length) {
       return session.symbols;
     }
-    return (await service.loadFile(uri.fsPath)).symbols;
+    return (await service.loadFile(fileOf(uri))).symbols;
   }
 
   async function pickSymbol(uri: vscode.Uri, arg: unknown): Promise<string | undefined> {
@@ -133,16 +127,16 @@ export function activate(context: vscode.ExtensionContext) {
       detail: s.text || undefined,
       picked: s.name === selected,
     }));
-    const item = await vscode.window.showQuickPick(items, { title: `Symbol of ${path.basename(uri.fsPath)}`, matchOnDetail: true });
+    const item = await vscode.window.showQuickPick(items, { title: `Symbol of ${baseName(uri)}`, matchOnDetail: true });
     return item?.label;
   }
 
   async function openDump(uri: vscode.Uri, symbol?: string) {
     if (!symbol) {
-      const size = (await fs.promises.stat(uri.fsPath)).size;
+      const size = (await statFile(fileOf(uri))).size;
       if (size > LARGE_FILE_BYTES) {
         const choice = await vscode.window.showWarningMessage(
-          `${path.basename(uri.fsPath)} is ${(size / 1024 / 1024).toFixed(0)} MB. Dumping the whole file may take a while and use a lot of memory.`,
+          `${baseName(uri)} is ${(size / 1024 / 1024).toFixed(0)} MB. Dumping the whole file may take a while and use a lot of memory.`,
           'Dump Anyway',
           'Pick a Symbol',
         );
@@ -154,7 +148,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     }
-    const doc = await vscode.workspace.openTextDocument(dumpUri(uri.fsPath, symbol));
+    const doc = await vscode.workspace.openTextDocument(dumpUri(fileOf(uri), symbol));
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
@@ -175,32 +169,34 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
     if (!session.showSymbol(symbol)) {
-      vscode.window.showWarningMessage(`${path.basename(uri.fsPath)} has no symbol ${symbol}.`);
+      vscode.window.showWarningMessage(`${baseName(uri)} has no symbol ${symbol}.`);
     }
   }
 
   /** Whether a GDX file has a symbol: from its open viewer, else from gdxdump's symbol list (one call). */
   async function hasSymbol(file: string, symbol: string): Promise<boolean> {
     const wanted = symbol.toLowerCase();
-    const session = viewer.sessionFor(vscode.Uri.file(file));
+    const session = viewer.sessionFor(fileUri(file));
     const symbols = session?.symbols.length ? session.symbols : await service.loadSymbolList(file);
     return symbols.some((s) => s.name.toLowerCase() === wanted);
   }
 
-  function compare(file1: vscode.Uri, file2: vscode.Uri) {
-    if (file1.scheme !== 'file' || file2.scheme !== 'file') {
+  function compare(uri1: vscode.Uri, uri2: vscode.Uri) {
+    const [file1, file2] = [fileKey(uri1), fileKey(uri2)];
+    if (file1 === undefined || file2 === undefined) {
       vscode.window.showErrorMessage('Only GDX files on the local file system can be compared.');
       return;
     }
-    DiffPanel.show(context.extensionUri, context.globalStorageUri, service, file1.fsPath, file2.fsPath);
+    DiffPanel.show(context.extensionUri, storage, service, file1, file2);
   }
 
   function compareScenarios(uris: vscode.Uri[]) {
-    if (uris.some((u) => u.scheme !== 'file')) {
+    const files = uris.map(fileKey);
+    if (files.some((f) => f === undefined)) {
       vscode.window.showErrorMessage('Only GDX files on the local file system can be compared.');
       return;
     }
-    ScenarioPanel.show(context.extensionUri, service, uris.map((u) => u.fsPath));
+    ScenarioPanel.show(context.extensionUri, service, files as string[]);
   }
 
   /** Runs a command body and reports failures uniformly. */
@@ -262,15 +258,15 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
         const target = await vscode.window.showSaveDialog({
-          defaultUri: vscode.Uri.file(path.join(path.dirname(uri.fsPath), `${symbol}.csv`)),
+          defaultUri: vscode.Uri.joinPath(uri, '..', `${symbol}.csv`),
           filters: { 'CSV files': ['csv'] },
         });
         if (!target) {
           return;
         }
-        const csv = await service.symbolCsv(uri.fsPath, symbol);
-        await vscode.workspace.fs.writeFile(target, Buffer.from(csv, 'utf8'));
-        const choice = await vscode.window.showInformationMessage(`Exported ${symbol} to ${path.basename(target.fsPath)}.`, 'Open');
+        const csv = await service.symbolCsv(fileOf(uri), symbol);
+        await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(csv));
+        const choice = await vscode.window.showInformationMessage(`Exported ${symbol} to ${baseName(target)}.`, 'Open');
         if (choice) {
           await vscode.window.showTextDocument(target);
         }
@@ -282,7 +278,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (uri) {
         selectedForCompare = uri;
         vscode.commands.executeCommand('setContext', 'gdxAnalyzer.hasSelectionForCompare', true);
-        vscode.window.setStatusBarMessage(`Selected ${path.basename(uri.fsPath)} for GDX compare`, 3000);
+        vscode.window.setStatusBarMessage(`Selected ${baseName(uri)} for GDX compare`, 3000);
       }
     }),
 
@@ -308,7 +304,7 @@ export function activate(context: vscode.ExtensionContext) {
           return compareScenarios(uris);
         }
         const first = currentGdx(arg) ?? (await pickGdx('First GDX File'));
-        const second = first && (await pickGdx(`Compare ${path.basename(first.fsPath)} with…`, first));
+        const second = first && (await pickGdx(`Compare ${baseName(first)} with…`, first));
         if (first && second) {
           compare(first, second);
         }
@@ -322,12 +318,12 @@ export function activate(context: vscode.ExtensionContext) {
         if (uris.length < 2) {
           const first = currentGdx(arg);
           const picked = await vscode.window.showOpenDialog({
-            title: first ? `Compare ${path.basename(first.fsPath)} with Scenarios` : 'Compare Scenarios (two or more GDX files)',
+            title: first ? `Compare ${baseName(first)} with Scenarios` : 'Compare Scenarios (two or more GDX files)',
             canSelectMany: true,
             filters: GDX_FILTER,
-            defaultUri: first ? vscode.Uri.file(path.dirname(first.fsPath)) : vscode.workspace.workspaceFolders?.[0]?.uri,
+            defaultUri: first ? vscode.Uri.joinPath(first, '..') : vscode.workspace.workspaceFolders?.[0]?.uri,
           });
-          uris = [...(first ? [first] : []), ...(picked ?? []).filter((u) => !first || u.fsPath !== first.fsPath)];
+          uris = [...(first ? [first] : []), ...(picked ?? []).filter((u) => !first || u.toString() !== first.toString())];
         }
         if (uris.length < 2) {
           if (uris.length) vscode.window.showInformationMessage('Select at least two GDX files to compare as scenarios.');
@@ -353,8 +349,8 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       'gdxAnalyzer.solutionReport',
       guarded('Showing the solution report failed', async (arg?: unknown) => {
-        // A path from the link of a hover.
-        const uri = typeof arg === 'string' ? vscode.Uri.file(arg) : await gdxOrPick(arg, 'Solution Report of GDX File');
+        // A file name from the link of a hover.
+        const uri = typeof arg === 'string' ? fileUri(arg) : await gdxOrPick(arg, 'Solution Report of GDX File');
         if (!uri) {
           return;
         }
@@ -367,7 +363,7 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
         if (!session.symbols.some((s) => s.type === 'Var' || s.type === 'Equ')) {
-          vscode.window.showInformationMessage(`${path.basename(uri.fsPath)} has no variables or equations.`);
+          vscode.window.showInformationMessage(`${baseName(uri)} has no variables or equations.`);
           return;
         }
         session.showReport();
@@ -381,9 +377,9 @@ export function activate(context: vscode.ExtensionContext) {
         if (!uri) {
           return;
         }
-        await viewer.states.clear(uri.fsPath);
+        await viewer.states.clear(fileOf(uri));
         viewer.sessionFor(uri)?.resetState();
-        vscode.window.setStatusBarMessage(`Reset the GDX viewer state of ${path.basename(uri.fsPath)}`, 3000);
+        vscode.window.setStatusBarMessage(`Reset the GDX viewer state of ${baseName(uri)}`, 3000);
       }),
     ),
 

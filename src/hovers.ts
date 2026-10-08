@@ -6,11 +6,12 @@
  * (the nearest reference before the name first, as GDX: Show Symbol), also a Python name bound to one
  * (limit = Equation(m, name="supply")). In a notebook, the references of all its cells count.
  */
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { GdxFileInfo } from './gdxFile';
 import { SELECTOR, SHOW_COMMAND, candidatePaths, existing, referencesOf } from './links';
+import { statFile } from './platform/files';
+import { displayFile } from './platform/uris';
 import { MAX_PREVIEW_RECORDS, filePreview, symbolPreview } from './preview';
 import { GdxService, errorMessage } from './service';
 import { TableView, UNIVERSE, cachedView, columnTable, universeSymbol, universeTable } from './table';
@@ -69,7 +70,8 @@ export class GdxHoverProvider implements vscode.HoverProvider {
     const bound = bindings.filter((n) => n.start <= offset).pop() ?? bindings[0];
     const name = (bound?.symbol ?? text).toLowerCase();
     const ordered = [...refs.files.filter((r) => r.start <= offset).reverse(), ...refs.files.filter((r) => r.start > offset)];
-    const files = [...new Set(ordered.map((r) => existing(candidatePaths(r.file, doc))).filter((f): f is string => !!f))];
+    const files = [...new Set((await Promise.all(ordered.map((r) => existing(candidatePaths(r.file, doc))))).filter((f): f is string => !!f))];
+    if (token.isCancellationRequested) return undefined;
     for (const file of files) {
       try {
         const info = await this.info(file);
@@ -85,8 +87,8 @@ export class GdxHoverProvider implements vscode.HoverProvider {
   }
 
   /** The symbols of a file, read again when it changed. */
-  private info(file: string): Promise<GdxFileInfo> {
-    const stat = fs.statSync(file);
+  private async info(file: string): Promise<GdxFileInfo> {
+    const stat = await statFile(file);
     const hit = this.files.get(file);
     if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
       return hit.info;
@@ -100,12 +102,12 @@ export class GdxHoverProvider implements vscode.HoverProvider {
 
   private missing(paths: string[]): vscode.Hover {
     const dirs = [...new Set(paths.map((p) => path.dirname(p)))];
-    return new vscode.Hover(markdown(`\`${path.basename(paths[0] ?? 'The GDX file')}\` does not exist (yet). Looked in: ${dirs.map((d) => `\`${d}\``).join(', ')}`));
+    return new vscode.Hover(markdown(`\`${path.basename(paths[0] ?? 'The GDX file')}\` does not exist (yet). Looked in: ${dirs.map((d) => `\`${displayFile(d)}\``).join(', ')}`));
   }
 
   /** `linked`: the name is a document link, which VS Code adds to the hover (no link of its own then). */
   private async fileHover(paths: string[], range: vscode.Range, linked: boolean): Promise<vscode.Hover> {
-    const file = existing(paths);
+    const file = await existing(paths);
     if (!file) {
       return this.missing(paths);
     }
@@ -118,7 +120,7 @@ export class GdxHoverProvider implements vscode.HoverProvider {
   }
 
   private async symbolHover(paths: string[], name: string, range: vscode.Range, token: vscode.CancellationToken, linked: boolean): Promise<vscode.Hover | undefined> {
-    const file = existing(paths);
+    const file = await existing(paths);
     if (!file) {
       return this.missing(paths);
     }
@@ -129,7 +131,7 @@ export class GdxHoverProvider implements vscode.HoverProvider {
     }
     let view: TableView | undefined;
     if (symbol.records <= MAX_PREVIEW_RECORDS) {
-      const stat = fs.statSync(file);
+      const stat = await statFile(file);
       view = await cachedView(this.views, [file, stat.mtimeMs, stat.size, symbol.name].join('\0'), () => {
         const loaded =
           symbol.name === UNIVERSE

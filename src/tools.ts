@@ -5,10 +5,12 @@
  * This module deliberately has no dependency on `vscode` so it can be unit tested.
  */
 import { spawn } from 'child_process';
-import { TextDecoder } from 'util';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { textDecoder } from './encoding';
+
+export { textDecoder } from './encoding';
 
 export type Backend = 'gams' | 'gamspy';
 export type BackendSetting = 'auto' | Backend;
@@ -340,18 +342,6 @@ export interface RunOptions {
   onStdout?: (chunk: string) => void;
   /** Encoding of the output (a WHATWG encoding label); UTF-8 by default. */
   encoding?: string;
-}
-
-/**
- * A decoder for the text encoding `label` (e.g. "utf-8", "windows-1252", "latin1");
- * throws a RangeError for unknown encodings.
- */
-export function textDecoder(label = 'utf-8'): TextDecoder {
-  try {
-    return new TextDecoder(label.trim() || 'utf-8');
-  } catch {
-    throw new RangeError(`Unknown text encoding "${label}" (setting gdxAnalyzer.encoding).`);
-  }
 }
 
 /** Output kept for error messages when it is streamed. */

@@ -1,7 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { NumberFormat, NumberStyle, normalizeFormat } from './format';
+import { baseName, uriIn } from './locations';
 import { CopyRequest, QueryAnswer, SelectionRequest, ShownStats, WebviewQuery, answerQuery as answer, copyText, selectionStats } from './query';
 import { ColumnValues, TableView } from './table';
 
@@ -177,25 +176,24 @@ export type ImageMessage =
   | { type: 'image'; name: string; format: 'png' | 'svg'; data: string }
   | { type: 'image'; name: string; format: 'notice'; text: string; error?: boolean };
 
-/** Saves a chart image where the user chooses (`base`: the suggested path without extension). */
-export async function saveChartImage(m: ImageMessage, base: string, onError: (err: unknown) => void) {
+/** Saves a chart image where the user chooses (suggested: `name` with the image's extension in `dir`). */
+export async function saveChartImage(m: ImageMessage, dir: string | undefined, name: string, onError: (err: unknown) => void) {
   if (m.format === 'notice') {
     if (m.error) vscode.window.showErrorMessage(m.text);
     else vscode.window.setStatusBarMessage(m.text, 3000);
     return;
   }
-  const dir = path.dirname(base);
   const target = await vscode.window.showSaveDialog({
     title: 'Save Chart Image',
-    defaultUri: vscode.Uri.file(path.join(dir, `${path.basename(base).replace(/[^\w.-]/g, '_')}.${m.format}`)),
+    defaultUri: uriIn(dir, `${name.replace(/[^\w.-]/g, '_')}.${m.format}`),
     filters: m.format === 'png' ? { 'PNG images': ['png'] } : { 'SVG images': ['svg'] },
   });
   if (!target) {
     return;
   }
   try {
-    await fs.promises.writeFile(target.fsPath, m.format === 'png' ? Buffer.from(m.data, 'base64') : m.data);
-    const choice = await vscode.window.showInformationMessage(`Saved the chart of ${m.name} as ${path.basename(target.fsPath)}.`, 'Open');
+    await vscode.workspace.fs.writeFile(target, m.format === 'png' ? Buffer.from(m.data, 'base64') : new TextEncoder().encode(m.data));
+    const choice = await vscode.window.showInformationMessage(`Saved the chart of ${m.name} as ${baseName(target)}.`, 'Open');
     if (choice) {
       await vscode.env.openExternal(target);
     }

@@ -3,13 +3,15 @@
  * symbols read or written by $load, execute_unload etc. open it at that symbol, and
  * "GDX: Show Symbol in GDX File" opens a GDX file of the document at the symbol under the cursor.
  */
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { GdxReferences, gamsReferences, pythonReferences } from './gdxRefs';
+import { fileExists } from './platform/files';
+import { IS_WEB, displayFile, fileKey, fileUri } from './platform/uris';
 
 const SCHEMES = ['file', 'untitled', 'vscode-notebook-cell'];
-export const SELECTOR: vscode.DocumentFilter[] = ['gams', 'python'].flatMap((language) => SCHEMES.map((scheme) => ({ language, scheme })));
+/** GAMS and Python documents: on the desktop those on disk (and notebooks), in the web extension those of any file system (e.g. vscode-vfs: of github.dev). */
+export const SELECTOR: vscode.DocumentFilter[] = ['gams', 'python'].flatMap((language) => (IS_WEB ? [{ language }] : SCHEMES.map((scheme) => ({ language, scheme }))));
 export const SHOW_COMMAND = 'gdxAnalyzer.showInViewer';
 
 function linksEnabled(): boolean {
@@ -41,9 +43,12 @@ export function referencesOf(doc: vscode.TextDocument): GdxReferences {
   return doc.languageId === 'python' ? pythonReferences(doc.getText()) : gamsReferences(doc.getText());
 }
 
-/** The directory of a document on disk (also for notebook cells), if it has one. */
+/** The directory of a document (of a notebook cell: of its notebook), if it is a file the GDX functions can read. */
 function documentDir(doc: vscode.TextDocument): string | undefined {
-  return doc.uri.scheme === 'file' || doc.uri.scheme === 'vscode-notebook-cell' ? path.dirname(doc.uri.fsPath) : undefined;
+  const id = doc.uri.toString();
+  const uri = doc.uri.scheme === 'vscode-notebook-cell' ? vscode.workspace.notebookDocuments.find((nb) => nb.getCells().some((c) => c.document.uri.toString() === id))?.uri : doc.uri;
+  const file = uri && fileKey(uri);
+  return file === undefined ? undefined : path.dirname(file);
 }
 
 /**
@@ -54,11 +59,17 @@ export function candidatePaths(file: string, doc: vscode.TextDocument): string[]
   if (path.isAbsolute(file)) {
     return [file];
   }
-  const dirs = [documentDir(doc), ...(vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => f.uri.fsPath)];
+  const dirs = [documentDir(doc), ...(vscode.workspace.workspaceFolders ?? []).map((f) => fileKey(f.uri))];
   return [...new Set(dirs.filter((d): d is string => !!d).map((d) => path.resolve(d, file)))];
 }
 
-export const existing = (paths: string[]) => paths.find((p) => fs.existsSync(p));
+/** The first of the files that exists. */
+export async function existing(paths: string[]): Promise<string | undefined> {
+  for (const p of paths) {
+    if (await fileExists(p)) return p;
+  }
+  return undefined;
+}
 
 function commandUri(paths: string[], symbol?: string): vscode.Uri {
   return vscode.Uri.parse(`command:${SHOW_COMMAND}?${encodeURIComponent(JSON.stringify([paths, symbol]))}`);
@@ -98,12 +109,12 @@ export function registerLinks(context: vscode.ExtensionContext, show: ShowInView
 
     vscode.commands.registerCommand(SHOW_COMMAND, async (paths: unknown, symbol?: unknown) => {
       const list = (Array.isArray(paths) ? paths : [paths]).filter((p): p is string => typeof p === 'string');
-      const file = existing(list);
+      const file = await existing(list);
       if (!file) {
-        vscode.window.showWarningMessage(`${path.basename(list[0] ?? 'The GDX file')} does not exist (yet). Looked in: ${list.map((p) => path.dirname(p)).join(', ')}`);
+        vscode.window.showWarningMessage(`${path.basename(list[0] ?? 'The GDX file')} does not exist (yet). Looked in: ${list.map((p) => displayFile(path.dirname(p))).join(', ')}`);
         return;
       }
-      await show(vscode.Uri.file(file), typeof symbol === 'string' ? symbol : undefined);
+      await show(fileUri(file), typeof symbol === 'string' ? symbol : undefined);
     }),
 
     vscode.commands.registerCommand('gdxAnalyzer.showSymbol', async () => {
@@ -136,10 +147,10 @@ async function pickFile(doc: vscode.TextDocument, at: vscode.Position, symbol: s
   const refs = referencesOf(doc);
   // Nearest reference before the cursor first, then the following ones.
   const ordered = [...refs.files.filter((r) => r.start <= offset).reverse(), ...refs.files.filter((r) => r.start > offset)];
-  let files = [...new Set(ordered.map((r) => existing(candidatePaths(r.file, doc))).filter((f): f is string => !!f))];
+  let files = [...new Set((await Promise.all(ordered.map((r) => existing(candidatePaths(r.file, doc))))).filter((f): f is string => !!f))];
   let where = 'this document';
   if (!files.length) {
-    files = (await vscode.workspace.findFiles('**/*.gdx', undefined, 50)).map((u) => u.fsPath);
+    files = (await vscode.workspace.findFiles('**/*.gdx', undefined, 50)).map(fileKey).filter((f): f is string => f !== undefined);
     where = 'the workspace';
   }
   if (!files.length) {
@@ -159,12 +170,12 @@ async function pickFile(doc: vscode.TextDocument, at: vscode.Position, symbol: s
     return undefined;
   }
   if (withSymbol.length === 1) {
-    return vscode.Uri.file(withSymbol[0]);
+    return fileUri(withSymbol[0]);
   }
   const base = documentDir(doc);
   const picked = await vscode.window.showQuickPick(
-    withSymbol.map((f) => ({ label: path.basename(f), description: base ? path.relative(base, path.dirname(f)) || undefined : path.dirname(f), file: f })),
+    withSymbol.map((f) => ({ label: path.basename(f), description: base ? path.relative(base, path.dirname(f)) || undefined : displayFile(path.dirname(f)), file: f })),
     { title: `Show ${symbol} in` },
   );
-  return picked && vscode.Uri.file(picked.file);
+  return picked && fileUri(picked.file);
 }

@@ -2,7 +2,7 @@
   "name": "gdx-analyzer",
   "displayName": "GDX Analyzer",
   "description": "Browse, chart and compare GAMS GDX files: a fast viewer with table view, charts, gdxdiff comparisons, Excel export and MCP tools for AI agents. Independent; not affiliated with GAMS.",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "publisher": "muhammet-soyturk",
   "author": {
     "name": "Muhammet Soyturk"
@@ -31,6 +31,7 @@
     "gdxdiff"
   ],
   "main": "./out/extension.js",
+  "browser": "./out-web/extension.js",
   "activationEvents": [
     "onLanguage:gams",
     "onLanguage:python"
@@ -226,7 +227,7 @@
         },
         {
           "command": "gdxAnalyzer.compareWithRevision",
-          "when": "resourceExtname == .gdx && !explorerResourceIsFolder && !listMultiSelection && gitOpenRepositoryCount != 0",
+          "when": "resourceExtname == .gdx && !explorerResourceIsFolder && !listMultiSelection && gitOpenRepositoryCount != 0 && !isWeb",
           "group": "3_compare@14"
         },
         {
@@ -260,7 +261,7 @@
         },
         {
           "command": "gdxAnalyzer.compareWithRevision",
-          "when": "activeCustomEditorId == gdxAnalyzer.viewer && gitOpenRepositoryCount != 0",
+          "when": "activeCustomEditorId == gdxAnalyzer.viewer && gitOpenRepositoryCount != 0 && !isWeb",
           "group": "1_gdx@2"
         },
         {
@@ -284,7 +285,19 @@
         },
         {
           "command": "gdxAnalyzer.compareWithRevision",
-          "when": "gitOpenRepositoryCount != 0"
+          "when": "gitOpenRepositoryCount != 0 && !isWeb"
+        },
+        {
+          "command": "gdxAnalyzer.setUpGitDiff",
+          "when": "!isWeb"
+        },
+        {
+          "command": "gdxAnalyzer.copyMcpServerConfig",
+          "when": "!isWeb"
+        },
+        {
+          "command": "gdxAnalyzer.showToolInfo",
+          "when": "!isWeb"
         },
         {
           "command": "gdxAnalyzer.showSymbol",
@@ -540,9 +553,13 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
+    "compile-web": "node scripts/build-web.mjs",
     "watch": "tsc -watch -p ./",
+    "watch-web": "node scripts/build-web.mjs --watch",
     "test:unit": "npm run compile && node --test \"out/test/unit/*.test.js\"",
     "test:integration": "npm run compile && node out/test/runIntegration.js",
+    "test:web": "npm run compile && node scripts/build-web.mjs --tests && node out/test/runWeb.js",
+    "run-web": "node scripts/build-web.mjs && vscode-test-web --quality=stable --extensionDevelopmentPath=. test/fixtures",
     "test": "npm run test:unit",
     "package": "scripts/package.sh",
     "fetch-tools": "python3 scripts/fetch-gdx-tools.py"
@@ -551,7 +568,12 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "~1.101.0",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^4.0.0",
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.3",
+    "path-browserify": "^1.0.1",
     "typescript": "^5.9.0"
   }
 }

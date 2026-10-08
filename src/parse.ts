@@ -22,6 +22,17 @@ export interface GdxSymbol {
   subtype?: string;
 }
 
+/** The names of the symbol types as GAMS writes them. */
+export const SYMBOL_TYPE_NAMES: Record<string, string> = { Set: 'Set', Par: 'Parameter', Var: 'Variable', Equ: 'Equation', Alias: 'Alias' };
+const SUBTYPE_NAMES: Record<string, string> = { sos1: 'SOS1', sos2: 'SOS2', semicont: 'SemiCont', semiint: 'SemiInt' };
+
+/** Type of a symbol as GAMS writes it, e.g. "Positive Variable". */
+export function typeLabel(s: Pick<GdxSymbol, 'type' | 'subtype'>): string {
+  const base = SYMBOL_TYPE_NAMES[s.type] ?? s.type;
+  if (!s.subtype) return base;
+  return `${SUBTYPE_NAMES[s.subtype] ?? s.subtype.charAt(0).toUpperCase() + s.subtype.slice(1)} ${base}`;
+}
+
 /**
  * Parses the output of `gdxdump <file> Symbols`:
  *

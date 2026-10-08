@@ -5,15 +5,15 @@
  * of the extension reads them (see gdxFile.ts): the symbols with their types, domains and
  * subtypes, the unique elements, and the records of a symbol in compact columns.
  *
- * Files are read in chunks with asynchronous reads, so large symbols do not block.
+ * Files are read in chunks with asynchronous reads, so large symbols do not block (see platform/files.ts).
  * No dependency on `vscode`.
  */
-import * as fs from 'fs';
 import * as zlib from 'zlib';
 import { ColumnStore, LabelColumn, Labels, NumberColumn, Sp, StoredColumn } from './columns';
 import type { GdxSymbol, SymbolColumns, SymbolType } from './parse';
 import { columnNames } from './parse';
-import { textDecoder } from './tools';
+import { textDecoder } from './encoding';
+import { ReadHandle, openFile } from './platform/files';
 
 /**
  * The "encoding" that keeps labels and texts byte for byte, one character (0-255) per byte. Not the
@@ -106,7 +106,7 @@ class Section {
   private ended = false;
 
   constructor(
-    private readonly fh: fs.promises.FileHandle,
+    private readonly fh: ReadHandle,
     private filePos: number,
     private readonly compressed: boolean,
     private readonly signal?: AbortSignal,
@@ -334,7 +334,7 @@ export class GdxReader {
       const decoder = textDecoder(encoding);
       text = (b) => (b.length ? decoder.decode(b) : '');
     }
-    const fh = await fs.promises.open(file, 'r');
+    const fh = await openFile(file);
     try {
       const head = new Section(fh, 0, false);
       await head.need(4096);
@@ -526,7 +526,7 @@ export class GdxReader {
    * equations, with Marginal, Lower, Upper and Scale), or the element texts of sets.
    */
   async symbolColumns(symbol: Pick<GdxSymbol, 'name' | 'dim' | 'type' | 'domain' | 'records'>, signal?: AbortSignal): Promise<SymbolColumns> {
-    const fh = await fs.promises.open(this.file, 'r');
+    const fh = await openFile(this.file);
     try {
       return await this.readRecords(fh, symbol, signal);
     } finally {
@@ -551,7 +551,7 @@ export class GdxReader {
    * reads its set or the universe, and a scalar without a stored record its default record.
    */
   async forEachRecord(e: SymbolEntry, onRecord: RecordHandler, signal?: AbortSignal): Promise<void> {
-    const fh = await fs.promises.open(this.file, 'r');
+    const fh = await openFile(this.file);
     try {
       await this.scan(fh, e, onRecord, signal);
     } finally {
@@ -559,7 +559,7 @@ export class GdxReader {
     }
   }
 
-  private async scan(fh: fs.promises.FileHandle, e: SymbolEntry, onRecord: RecordHandler, signal?: AbortSignal): Promise<void> {
+  private async scan(fh: ReadHandle, e: SymbolEntry, onRecord: RecordHandler, signal?: AbortSignal): Promise<void> {
     let target: SymbolEntry | undefined = e;
     for (let guard = 0; target && target.dataType === 4 && guard < 100; guard++) {
       target = target.userInfo > 0 ? this.entries[target.userInfo - 1] : undefined;
@@ -655,7 +655,7 @@ export class GdxReader {
     }
   }
 
-  private async readRecords(fh: fs.promises.FileHandle, symbol: Pick<GdxSymbol, 'name' | 'dim' | 'type' | 'domain' | 'records'>, signal?: AbortSignal): Promise<SymbolColumns> {
+  private async readRecords(fh: ReadHandle, symbol: Pick<GdxSymbol, 'name' | 'dim' | 'type' | 'domain' | 'records'>, signal?: AbortSignal): Promise<SymbolColumns> {
     const e = this.entry(symbol.name);
     let target: SymbolEntry | undefined = e;
     for (let guard = 0; target && target.dataType === 4 && guard < 100; guard++) {

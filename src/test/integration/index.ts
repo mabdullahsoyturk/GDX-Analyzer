@@ -313,6 +313,10 @@ const tests: [string, () => Promise<void>][] = [
 ];
 
 export async function run(): Promise<void> {
+  // If the extension cannot be activated, every test would wait for its timeouts: stop with the reason instead.
+  const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'gdx-analyzer');
+  if (!ext) throw new Error('The extension under test is not loaded.');
+  await ext.activate();
   let failed = 0;
   for (const [name, fn] of tests) {
     try {

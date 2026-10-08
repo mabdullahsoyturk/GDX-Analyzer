@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { GdxFileInfo, GdxSource, compareFiles, loadDomains, loadDumpText, loadFileInfo, loadSymbolColumns, loadSymbolCsv, loadSymbolList, loadUels } from './gdxFile';
 import { GdxSymbol, SymbolColumns } from './parse';
+import { IS_WEB } from './platform/uris';
 import { SelectionStatus } from './selectionStatus';
 import { BackendSetting, DiffOptions, GdxTools, ResolvedTools, RunResult, ToolNotFoundError, resolveTools } from './tools';
 
@@ -55,9 +56,12 @@ export class GdxService implements vscode.Disposable {
     return vscode.workspace.getConfiguration('gdxAnalyzer').get<string>('encoding', 'utf-8').trim() || 'utf-8';
   }
 
-  /** Setting gdxAnalyzer.useGamsTools: read, dump and compare GDX files with gdxdump and gdxdiff instead of natively. */
+  /**
+   * Setting gdxAnalyzer.useGamsTools: read, dump and compare GDX files with gdxdump and gdxdiff instead of
+   * natively (not in the web extension, which cannot run them).
+   */
   useGamsTools(): boolean {
-    return vscode.workspace.getConfiguration('gdxAnalyzer').get<boolean>('useGamsTools', false);
+    return !IS_WEB && vscode.workspace.getConfiguration('gdxAnalyzer').get<boolean>('useGamsTools', false);
   }
 
   /** How GDX files are read (natively unless set otherwise; the tools are only resolved when needed). */

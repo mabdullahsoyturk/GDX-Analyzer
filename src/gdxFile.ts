@@ -4,14 +4,14 @@
  * (gdxReader.ts, gdxText.ts, gdxDiff.ts) or, with `useGamsTools` or for files the native reader does
  * not support, with gdxdump and gdxdiff. No dependency on `vscode`, so the MCP server (mcp.ts) can use it too.
  */
-import * as fs from 'fs';
 import * as path from 'path';
 import { GdxFormatError, GdxReader } from './gdxReader';
 import { dumpText, symbolCsv } from './gdxText';
 import { gdxDiff } from './gdxDiff';
+import { statFile } from './platform/files';
 import type { DiffOptions, RunResult } from './tools';
 import { GdxSymbol, SymbolColumns, mergeDomainInfo, mergeSubtypes, parseDomainInfo, parseSubtypes, parseSymbolStream, parseSymbols, parseUelTable, parseVersionInfo } from './parse';
-import { GdxTools } from './tools';
+import type { GdxTools } from './tools';
 
 export interface GdxFileInfo {
   version: [string, string][];
@@ -39,7 +39,7 @@ const readers = new Map<string, { mtimeMs: number; size: number; reader: Promise
 const MAX_READERS = 4;
 
 async function nativeReader(file: string, encoding: string): Promise<GdxReader> {
-  const stat = await fs.promises.stat(file);
+  const stat = await statFile(file);
   const key = `${file}\0${encoding}`;
   const hit = readers.get(key);
   if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {

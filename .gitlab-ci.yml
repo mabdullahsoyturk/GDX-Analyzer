@@ -40,15 +40,27 @@ test:
     paths:
       - tools/.cache/
 
+# The tests of the web extension, in VS Code for the Web in a headless Chromium (the image has the
+# browsers of the Playwright version that @vscode/test-web uses).
+test-web:
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.64.0-noble
+  script:
+    - npm ci
+    - npm run test:web
+  cache:
+    key: vscode-web-stable
+    paths:
+      - .vscode-test-web/
+
 #### PACKAGE ####
 
 package:
   stage: package
   image: $NODE_IMAGE
-  needs: [test]
+  needs: [test, test-web]
   script:
     - npm ci
-    - npm run compile
     - scripts/package.sh
     - ls -l dist
   artifacts:

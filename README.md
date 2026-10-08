@@ -7,7 +7,8 @@ Browse, chart and compare [GAMS](https://www.gams.com) GDX files in Visual Studi
 GDX Analyzer opens `.gdx` files in a fast, read-only viewer, compares files as gdxdiff does, across scenarios and
 with their Git history, links GAMS and Python code to the data, exports to Excel and Python, and gives AI agents
 read-only access to model data and solutions. GDX files are read, compared as gdxdiff does, and written as gdxdump
-text and CSV by the extension itself, so no GAMS installation is needed. See the [changelog](CHANGELOG.md) for what is new.
+text and CSV by the extension itself, so no GAMS installation is needed, and it also runs in VS Code for the Web
+(vscode.dev, github.dev). See the [changelog](CHANGELOG.md) for what is new.
 
 > GDX Analyzer is an independent project by Muhammet Soyturk. It is not affiliated with or endorsed by GAMS.
 
@@ -164,6 +165,19 @@ available to agent mode in VS Code automatically. For Claude Code, Cursor and ot
 | `gdx_compare_scenarios` | One symbol across several files, with Δ and Δ% from a base scenario; filters, grouping, sorting by magnitude and paging |
 | `gdx_solution_report` | The solution status of all variables and equations: records outside their bounds, binding constraints, levels at bounds |
 
+### VS Code for the Web
+
+GDX Analyzer also runs in [VS Code for the Web](https://code.visualstudio.com/docs/setup/vscode-web): open a
+repository on github.dev (press <kbd>.</kbd> on its GitHub page) or a folder on vscode.dev, and its GDX files open in
+the viewer, with nothing installed. The viewer, the solution report, comparisons of files and scenarios, charts, the
+exports (Excel, CSV, Save as GDX, gdxdump text), Create GDX from CSV/Excel, and the links and hover previews in GAMS
+and Python source work as on the desktop; a diff of two versions of a GDX file (e.g. of a change in Source Control)
+shows both versions in the viewer. Copy as Code and GAMS Connect instructions name the files relative to the workspace folder.
+
+Not available in the browser: the MCP server for AI agents, gdxdump and gdxdiff (`gdxAnalyzer.useGamsTools`),
+**Compare with Git Revision…**, **Set Up Git Diff for GDX Files…** and the command line. A file is read whole into
+memory there (see [Performance](#performance)).
+
 ## Getting started
 
 1. Install GDX Analyzer from the Visual Studio Marketplace.
@@ -226,6 +240,8 @@ menu and the viewer.
   needed. gdxdump and gdxdiff of a [GAMS](https://www.gams.com) installation or of
   [GAMSPy](https://gamspy.readthedocs.io) are only used with `gdxAnalyzer.useGamsTools`, and for GDX files the
   extension cannot read itself.
+- Also VS Code for the Web (vscode.dev, github.dev), with the features listed in
+  [VS Code for the Web](#vs-code-for-the-web).
 
 ## Performance
 
@@ -242,11 +258,17 @@ Comparing two files with 2 million differing records takes about 1.9 seconds (4 
 scenarios of a symbol with 1 million records each (5 million rows) takes 1.5 s and 310 MB for a parameter, and 1.9 s
 and 580 MB for a variable; the table view, a sort by Δ and a chart then take 0.1–1.6 s.
 
+In VS Code for the Web, a file is read whole into memory, and compressed files are decompressed in JavaScript: in a
+measurement in Chromium, the 10 million records of a 3-dimensional parameter took 0.7 s from a 102 MB uncompressed
+file (0.45 s on the desktop) and 2 s from an 80 MB compressed one (0.8 s on the desktop), after 0.2–0.3 s to read the
+file.
+
 ## Limitations
 
-- GDX files are read from a regular file system: files of other file systems (such as Git revisions) are viewed
-  through a temporary copy; comparisons, GAMS Connect instructions and Copy as Code need files on disk. vscode.dev is
-  not supported.
+- On the desktop, GDX files are read from a regular file system: files of other file systems (such as Git revisions)
+  are viewed through a temporary copy; comparisons, GAMS Connect instructions and Copy as Code need files on disk.
+  In VS Code for the Web, files of any file system are read, whole into memory (see
+  [VS Code for the Web](#vs-code-for-the-web) for what is not available there).
 - The native reader reads GDX file formats 5 to 7, compressed or not, written with little-endian byte order (all
   current platforms); other files are read and compared with gdxdump and gdxdiff, if available.
 - Sums of relative differences (Δ%) and of the bounds and scale of variables and equations are left empty in

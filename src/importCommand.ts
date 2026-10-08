@@ -2,11 +2,10 @@
  * GDX: Create GDX from CSV/Excel…: asks how the columns of a CSV file or an Excel sheet make a
  * symbol (see gdxImport.ts) and writes it as a GDX file.
  */
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ImportError, cellValue, isIdentifier, parseCsv, tableToGdx } from './gdxImport';
-import { textDecoder } from './tools';
+import { textDecoder } from './encoding';
 import { readXlsx } from './xlsxRead';
 
 /** Files that can be read as tables. */
@@ -53,7 +52,8 @@ export async function createGdxFromTable(arg?: unknown): Promise<void> {
   if (!source) {
     return;
   }
-  const file = source.fsPath;
+  // The name of the file (for its extension and messages), whatever its file system.
+  const file = path.posix.basename(source.path);
   const base = path.basename(file).replace(/\.[^.]+$/, '');
   const buf = Buffer.from(await vscode.workspace.fs.readFile(source));
   const excel = /\.xls[xm]$/i.test(file);
@@ -147,16 +147,14 @@ export async function createGdxFromTable(arg?: unknown): Promise<void> {
   }
   const target = await vscode.window.showSaveDialog({
     title: 'Save GDX File',
-    defaultUri: vscode.Uri.file(path.join(path.dirname(file), `${base}.gdx`)),
+    defaultUri: vscode.Uri.joinPath(source, '..', `${base}.gdx`),
     filters: { 'GDX files': ['gdx'] },
   });
   if (!target) return;
-  const temp = `${target.fsPath}.${process.pid}.tmp`;
-  await fs.promises.writeFile(temp, result.data);
-  await fs.promises.rename(temp, target.fsPath);
+  await vscode.workspace.fs.writeFile(target, result.data);
   const what = `${type === 'set' ? 'Set' : 'Parameter'} ${symbol.trim()} with ${result.records.toLocaleString()} record${result.records === 1 ? '' : 's'}`;
   const skipped = result.skipped ? ` (${result.skipped.toLocaleString()} empty cell${result.skipped === 1 ? '' : 's'} left out)` : '';
-  const choice = await vscode.window.showInformationMessage(`Created ${path.basename(target.fsPath)}: ${what}${skipped}.`, 'Open');
+  const choice = await vscode.window.showInformationMessage(`Created ${path.posix.basename(target.path)}: ${what}${skipped}.`, 'Open');
   if (choice) {
     await vscode.commands.executeCommand('vscode.openWith', target, 'gdxAnalyzer.viewer');
   }

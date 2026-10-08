@@ -3,10 +3,12 @@
  * differences from a base scenario (see scenario.ts). Files can be added and removed and
  * any of them can be the base; the panel reads the files again when they change.
  */
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { GdxFileInfo } from './gdxFile';
+import { watchFile } from './locations';
+import { fileExists } from './platform/files';
+import { displayFile, fileKey, fileUri } from './platform/uris';
 import { GdxSymbol } from './parse';
 import { baseAfterRemoval, scenarioNames, scenarioTable } from './scenario';
 import { GdxService, errorMessage } from './service';
@@ -104,7 +106,7 @@ export class ScenarioPanel implements vscode.Disposable {
   private watch() {
     this.watchers.forEach((d) => d.dispose());
     this.watchers = this.files.flatMap((f) => {
-      const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.dirname(f)), path.basename(f)));
+      const w = watchFile(f);
       const changed = () => {
         clearTimeout(this.reloadTimer);
         // GAMS writes GDX files incrementally: wait until the writes settle.
@@ -122,7 +124,7 @@ export class ScenarioPanel implements vscode.Disposable {
     this.selection.reset();
     this.panel.title = this.title();
     this.watch();
-    const results = await Promise.allSettled(this.files.map((f) => this.service.loadFile(f)));
+    const [results, exist] = await Promise.all([Promise.allSettled(this.files.map((f) => this.service.loadFile(f))), Promise.all(this.files.map(fileExists))]);
     if (gen !== this.generation) {
       return;
     }
@@ -130,7 +132,7 @@ export class ScenarioPanel implements vscode.Disposable {
     const names = scenarioNames(this.files);
     const files = this.files.map((f, i) => {
       const r = results[i];
-      return { path: f, name: names[i], error: r.status === 'rejected' ? errorMessage(r.reason) : fs.existsSync(f) ? undefined : 'The file does not exist.' };
+      return { path: displayFile(f), name: names[i], error: r.status === 'rejected' ? errorMessage(r.reason) : exist[i] ? undefined : 'The file does not exist.' };
     });
     // The symbols of all files: in the order of the first file that has them.
     const symbols: ScenarioSymbol[] = [];
@@ -223,7 +225,7 @@ export class ScenarioPanel implements vscode.Disposable {
         }
         return;
       case 'image':
-        return saveChartImage(m, path.join(path.dirname(this.files[this.base] ?? this.files[0]), `scenarios_${m.name}`), (err) => this.service.showError('Saving the chart image failed', err));
+        return saveChartImage(m, path.dirname(this.files[this.base] ?? this.files[0]), `scenarios_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
       case 'action':
         switch (m.action) {
           case 'refresh':
@@ -246,9 +248,10 @@ export class ScenarioPanel implements vscode.Disposable {
               title: 'Add Scenarios',
               canSelectMany: true,
               filters: { 'GDX files': ['gdx'] },
-              defaultUri: vscode.Uri.file(path.dirname(this.files[this.files.length - 1])),
+              defaultUri: fileUri(path.dirname(this.files[this.files.length - 1])),
             });
-            const added = (picked ?? []).map((u) => u.fsPath).filter((f) => !this.files.includes(f));
+            // Files the GDX functions can read (on the desktop: of the local file system).
+            const added = (picked ?? []).map(fileKey).filter((f): f is string => f !== undefined && !this.files.includes(f));
             if (added.length) {
               this.files = [...this.files, ...added];
               return this.load();
@@ -257,7 +260,7 @@ export class ScenarioPanel implements vscode.Disposable {
           }
           case 'open':
             if (this.files[m.index]) {
-              return vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(this.files[m.index]), 'gdxAnalyzer.viewer');
+              return vscode.commands.executeCommand('vscode.openWith', fileUri(this.files[m.index]), 'gdxAnalyzer.viewer');
             }
             return;
         }

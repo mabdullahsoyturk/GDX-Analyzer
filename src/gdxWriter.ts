@@ -6,7 +6,7 @@
  *
  * No dependency on `vscode`.
  */
-import * as fs from 'fs';
+import { writeFile } from './platform/files';
 
 const HEADER_NR = 123;
 const VERSION = 7;
@@ -443,8 +443,6 @@ export class GdxWriter {
 
   /** Writes the file (to a temporary file that replaces `file`, so that readers never see half of it). */
   async write(file: string): Promise<void> {
-    const temp = `${file}.${process.pid}.tmp`;
-    await fs.promises.writeFile(temp, this.bytes());
-    await fs.promises.rename(temp, file);
+    await writeFile(file, this.bytes());
   }
 }

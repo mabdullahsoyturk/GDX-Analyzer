@@ -9,7 +9,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { GdxFileInfo, GdxSource, compareFiles, loadDomains, loadFileInfo, loadSymbolColumns, loadUels } from './gdxFile';
-import { GdxSymbol, parseDiffOutput } from './parse';
+import { GdxSymbol, SYMBOL_TYPE_NAMES as TYPE_NAMES, parseDiffOutput, typeLabel } from './parse';
+
+export { typeLabel } from './parse';
 import { scenarioNames, scenarioTable } from './scenario';
 import { MAX_REPORT_RECORDS, SolutionReport, SymbolSolution, amountText, recordName, solutionReport } from './solutionReport';
 import { AGGREGATES, Aggregate, BOUND_TOLERANCE, Column, ColumnFilter, ColumnStats, RowSelection, SOLUTION_FILTERS, SolutionFilter, TableView, UNIVERSE, cachedView, columnTable, diffColumnTable, universeSymbol, universeTable } from './table';
@@ -218,16 +220,7 @@ export const TOOL_SPECS: ToolSpec[] = [
 /** An error in the arguments of a tool call (reported to the agent as a tool error). */
 export class QueryError extends Error {}
 
-const TYPE_NAMES: Record<string, string> = { Set: 'Set', Par: 'Parameter', Var: 'Variable', Equ: 'Equation', Alias: 'Alias' };
-const SUBTYPE_NAMES: Record<string, string> = { sos1: 'SOS1', sos2: 'SOS2', semicont: 'SemiCont', semiint: 'SemiInt' };
 const FIELD_ALIASES: Record<string, string> = { l: 'level', m: 'marginal', lo: 'lower', up: 'upper', val: 'value' };
-
-/** Type of a symbol as GAMS writes it, e.g. "Positive Variable". */
-export function typeLabel(s: Pick<GdxSymbol, 'type' | 'subtype'>): string {
-  const base = TYPE_NAMES[s.type] ?? s.type;
-  if (!s.subtype) return base;
-  return `${SUBTYPE_NAMES[s.subtype] ?? s.subtype.charAt(0).toUpperCase() + s.subtype.slice(1)} ${base}`;
-}
 
 function signature(s: GdxSymbol): string {
   return s.dim && s.name !== UNIVERSE ? `${s.name}(${s.domain.join(',')})` : s.name;

@@ -7,9 +7,30 @@ npm install
 npm run compile            # or: npm run watch
 npm test                   # unit tests; also runs gdxdump/gdxdiff through each backend that is found
 npm run test:integration   # tests inside a VS Code extension host
+npm run compile-web        # the web extension (out-web/extension.js); or: npm run watch-web
+npm run test:web           # tests in VS Code for the Web, in a headless Chromium
+npm run run-web            # VS Code for the Web with the extension and test/fixtures, in a browser
 ```
 
 Press <kbd>F5</kbd> in VS Code to launch an Extension Development Host with `test/fixtures` open.
+
+### The web extension
+
+The same sources make the web extension for VS Code for the Web (vscode.dev, github.dev): `scripts/build-web.mjs`
+bundles `src/extension.ts` with esbuild for a web worker (the `browser` entry of `package.json`). A module `x.ts`
+with a `x.web.ts` next to it is replaced by that one there:
+
+| Module | Desktop | Web |
+| --- | --- | --- |
+| `platform/files.ts` | Files by path, read at positions with file handles | Files of VS Code's file systems (`vscode.workspace.fs`), named by keys like `/<scheme>/@<authority>/<path>` that behave like paths, read whole |
+| `platform/uris.ts` | `fileKey(uri)`: the path of a `file:` URI (other URIs: viewed through a copy) | The key of any URI |
+| `tools.ts` | gdxdump and gdxdiff | None (reading is native) |
+| `nodeFeatures.ts` | MCP server, Git revisions, git diff setup | None |
+
+`zlib` is replaced by fflate (`platform/zlib.web.ts`), `path` by path-browserify, and `Buffer` and `process` are
+provided (`platform/globals.web.js`); any other module of Node.js fails the build. `platform/variants.ts` checks at
+compile time that the web modules export what the desktop ones do. `test:web` also checks that every fixture reads in
+the browser exactly as on the desktop (symbols, gdxdump text and CSV).
 
 Environment variables for the tests:
 
@@ -54,8 +75,9 @@ The README's relative links and images are rewritten to the public GitHub reposi
 
 The GitLab pipeline (`.gitlab-ci.yml`):
 
-1. runs the unit tests, with gdxdump and gdxdiff for Linux x64 to compare with,
-2. packages the extension, and
+1. runs the unit tests, with gdxdump and gdxdiff for Linux x64 to compare with, and the tests of the web extension
+   in a Playwright image,
+2. packages the extension (both the desktop and the web extension), and
 3. on a tag matching the version in `package.json` (`v0.9.0` or `0.9.0`), publishes to the Visual Studio
    Marketplace and Open VSX. These are manual jobs that need the CI/CD variables `VSCE_PAT` and `OVSX_PAT`.
 
@@ -63,7 +85,8 @@ The GitLab pipeline (`.gitlab-ci.yml`):
 
 | Path | Contents |
 | --- | --- |
-| `src/extension.ts` | Activation and commands |
+| `src/extension.ts` | Activation and commands (desktop and web) |
+| `src/platform/`, `src/locations.ts`, `src/nodeFeatures.ts` | File access and naming of the desktop and web extension (see above), desktop-only features |
 | `src/tools.ts` | Locating the tools, command lines for both backends, running processes |
 | `src/gdxReader.ts`, `src/gdxFile.ts` | The native GDX reader, and reading GDX files with it or gdxdump |
 | `src/gdxText.ts` | gdxdump's text output (normal format and CSV) written from the native reader |

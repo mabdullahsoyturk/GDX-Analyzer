@@ -1,7 +1,8 @@
-import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { baseName, fileOf, uriIn, watchFile } from './locations';
+import { makeDirectory, remove, writeFile } from './platform/files';
+import { codeFile, defaultDirectory, displayFile, fileKey, fileUri } from './platform/uris';
 import { GdxSymbol } from './parse';
 import { GdxFileInfo, GdxService, errorMessage } from './service';
 import { TableView, UNIVERSE, cachedView, columnTable, universeSymbol, universeTable } from './table';
@@ -60,6 +61,8 @@ class ViewerSession implements vscode.Disposable {
   constructor(
     private readonly service: GdxService,
     readonly uri: vscode.Uri,
+    /** The name of the file for the GDX functions (see platform/uris.ts). */
+    readonly file: string,
     private readonly panel: vscode.WebviewPanel,
     private readonly states: ViewStateStore,
     /** The file of another file system (e.g. git:) whose temporary copy `uri` is. */
@@ -67,9 +70,7 @@ class ViewerSession implements vscode.Disposable {
   ) {
     this.loaded = new Promise((resolve) => (this.markLoaded = resolve));
     this.selection = new SelectionTracker(service.selectionStatus, panel);
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(path.dirname(uri.fsPath)), path.basename(uri.fsPath)),
-    );
+    const watcher = watchFile(file);
     this.disposables.push(
       this.selection,
       trackTablePanel(panel),
@@ -112,10 +113,14 @@ class ViewerSession implements vscode.Disposable {
     return rememberViews() && !this.copyOf;
   }
 
-  /** The default path of a file saved from the viewer: next to the GDX file, for a copy in the workspace. */
-  private savePath(name: string): string {
-    const dir = this.copyOf ? (vscode.workspace.workspaceFolders?.find((f) => f.uri.scheme === 'file')?.uri.fsPath ?? os.homedir()) : path.dirname(this.uri.fsPath);
-    return path.join(dir, name);
+  /** Where files saved from the viewer go by default: next to the GDX file, for a copy in the workspace. */
+  private saveDirectory(): string | undefined {
+    return this.copyOf ? defaultDirectory() : path.dirname(this.file);
+  }
+
+  /** The name of the GDX file without its extension, the start of the names of files saved from it. */
+  private stem(): string {
+    return path.basename(this.file).replace(/\.gdx$/i, '');
   }
 
   /**
@@ -169,7 +174,7 @@ class ViewerSession implements vscode.Disposable {
       const abort = (this.reportAbort = new AbortController());
       // In a promise: finding the tools may fail, which the report then shows.
       const report = Promise.resolve().then(() =>
-        solutionReport(this.service.source(), this.uri.fsPath, info.symbols, {
+        solutionReport(this.service.source(), this.file, info.symbols, {
           signal: abort.signal,
           // Symbols the viewer has in memory are not read again.
           cached: (symbol) => this.views.get(symbol.name),
@@ -188,7 +193,7 @@ class ViewerSession implements vscode.Disposable {
       }
     } catch (err) {
       if (gen === this.generation && pending === this.report) {
-        this.service.log(`Error in the solution report of ${this.uri.fsPath}: ${errorMessage(err)}`);
+        this.service.log(`Error in the solution report of ${this.file}: ${errorMessage(err)}`);
         this.post({ type: 'reportError', message: errorMessage(err) });
       }
     }
@@ -213,10 +218,9 @@ class ViewerSession implements vscode.Disposable {
       vscode.window.showWarningMessage(`The GAMS Connect instructions would read a temporary copy of ${this.copyOf.toString(true)}: save the GDX file on disk first.`);
       return;
     }
-    const base = this.savePath(path.basename(this.uri.fsPath)).replace(/\.gdx$/i, '');
     const target = await vscode.window.showSaveDialog({
       title: mode === 'excel' ? 'Export to Excel' : 'Save GAMS Connect Instructions',
-      defaultUri: vscode.Uri.file(mode === 'excel' ? base + '.xlsx' : base + '_export.yaml'),
+      defaultUri: uriIn(this.saveDirectory(), mode === 'excel' ? `${this.stem()}.xlsx` : `${this.stem()}_export.yaml`),
       filters: mode === 'excel' ? { 'Excel workbooks': ['xlsx'] } : { 'GAMS Connect instructions': ['yaml', 'yml'] },
     });
     if (!target) {
@@ -241,14 +245,15 @@ class ViewerSession implements vscode.Disposable {
       );
       const defaults = { format: defaultFormat(), squeezeDefaults: squeezeDefaults() };
       if (mode === 'excel') {
-        await fs.promises.writeFile(target.fsPath, writeXlsx(buildSheets(items, options, defaults)));
-        const choice = await vscode.window.showInformationMessage(`Exported ${items.length} symbol${items.length === 1 ? '' : 's'} to ${path.basename(target.fsPath)}.`, 'Open');
+        await vscode.workspace.fs.writeFile(target, writeXlsx(buildSheets(items, options, defaults)));
+        const choice = await vscode.window.showInformationMessage(`Exported ${items.length} symbol${items.length === 1 ? '' : 's'} to ${baseName(target)}.`, 'Open');
         if (choice) {
           await vscode.env.openExternal(target);
         }
       } else {
-        const xlsx = target.fsPath.replace(/(_export)?\.ya?ml$/i, '') + '.xlsx';
-        await fs.promises.writeFile(target.fsPath, connectInstructions(this.uri.fsPath, xlsx, items, options, defaults), 'utf8');
+        // The instructions name the files as GAMS Connect finds them (in the web extension: relative to the workspace folder).
+        const xlsx = codeFile(fileOf(target).replace(/(_export)?\.ya?ml$/i, '') + '.xlsx');
+        await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(connectInstructions(codeFile(this.file), xlsx, items, options, defaults)));
         await vscode.window.showTextDocument(target);
       }
     } catch (err) {
@@ -261,16 +266,15 @@ class ViewerSession implements vscode.Disposable {
    * `applyFilters`, only the records passing the filters of their views (see gdxSubset.ts).
    */
   private async exportGdx(names: string[], options: ExportOptions, states: Record<string, SymbolViewState>) {
-    const base = this.savePath(path.basename(this.uri.fsPath)).replace(/\.gdx$/i, '');
     const target = await vscode.window.showSaveDialog({
       title: 'Save Symbols as GDX',
-      defaultUri: vscode.Uri.file(`${base}_${names.length === 1 ? names[0] : 'subset'}.gdx`),
+      defaultUri: uriIn(this.saveDirectory(), `${this.stem()}_${names.length === 1 ? names[0] : 'subset'}.gdx`),
       filters: { 'GDX files': ['gdx'] },
     });
     if (!target) {
       return;
     }
-    if (path.resolve(target.fsPath) === path.resolve(this.uri.fsPath) || (this.copyOf?.scheme === 'file' && path.resolve(target.fsPath) === path.resolve(this.copyOf.fsPath))) {
+    if (fileKey(target) === this.file || target.toString() === this.copyOf?.toString()) {
       vscode.window.showErrorMessage('Choose another file: the symbols cannot be saved into the GDX file they are read from.');
       return;
     }
@@ -289,17 +293,17 @@ class ViewerSession implements vscode.Disposable {
               items.push({ name });
             }
           }
-          return writeGdxSubset(this.uri.fsPath, target.fsPath, items);
+          return writeGdxSubset(this.file, fileOf(target), items);
         },
       );
       const notes = [
         ...(result.addedSets.length ? [`Also saved, as sets of the aliases chosen: ${result.addedSets.join(', ')}.`] : []),
         ...result.relaxed.map((r) => `${r.name} has a relaxed domain (${r.reason}).`),
       ];
-      notes.forEach((n) => this.service.log(`Save as GDX ${path.basename(target.fsPath)}: ${n}`));
+      notes.forEach((n) => this.service.log(`Save as GDX ${baseName(target)}: ${n}`));
       const symbols = `${result.symbols.length} symbol${result.symbols.length === 1 ? '' : 's'}`;
       const choice = await vscode.window.showInformationMessage(
-        `Saved ${symbols} with ${result.records.toLocaleString()} records to ${path.basename(target.fsPath)}.${notes.length ? ' ' + notes.join(' ') : ''}`,
+        `Saved ${symbols} with ${result.records.toLocaleString()} records to ${baseName(target)}.${notes.length ? ' ' + notes.join(' ') : ''}`,
         'Open',
       );
       if (choice) {
@@ -321,7 +325,8 @@ class ViewerSession implements vscode.Disposable {
       return;
     }
     try {
-      const code = symbolCode({ language, file: this.uri.fsPath, symbol, view: await this.orderedView(name), state, squeezeDefaults: squeezeDefaults() });
+      // The file as the code finds it (in the web extension: relative to the workspace folder).
+      const code = symbolCode({ language, file: codeFile(this.file), symbol, view: await this.orderedView(name), state, squeezeDefaults: squeezeDefaults() });
       if (target === 'editor') {
         await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'python', content: code }));
       } else {
@@ -364,7 +369,7 @@ class ViewerSession implements vscode.Disposable {
     this.report = undefined;
     this.selection.reset();
     try {
-      const info = await this.service.loadFile(this.uri.fsPath);
+      const info = await this.service.loadFile(this.file);
       if (gen !== this.generation) {
         return;
       }
@@ -373,9 +378,9 @@ class ViewerSession implements vscode.Disposable {
         type: 'file',
         protocol: PROTOCOL,
         // The view saved when the file was last open (applied by the webview once).
-        savedState: this.remembered() ? this.states.get(this.uri.fsPath) : undefined,
-        fileName: path.basename(this.uri.fsPath),
-        filePath: this.copyOf ? this.copyOf.toString(true) : this.uri.fsPath,
+        savedState: this.remembered() ? this.states.get(this.file) : undefined,
+        fileName: path.basename(this.file),
+        filePath: this.copyOf ? this.copyOf.toString(true) : displayFile(this.file),
         tools: this.service.describeReader(),
         version: info.version,
         symbols: [universeSymbol(info.version), ...info.symbols],
@@ -388,7 +393,7 @@ class ViewerSession implements vscode.Disposable {
     } catch (err) {
       if (gen === this.generation) {
         this.info = undefined;
-        this.service.log(`Error reading ${this.uri.fsPath}: ${errorMessage(err)}`);
+        this.service.log(`Error reading ${this.file}: ${errorMessage(err)}`);
         this.post({ type: 'fileError', message: errorMessage(err) });
       }
     } finally {
@@ -412,7 +417,7 @@ class ViewerSession implements vscode.Disposable {
     return cachedView(this.views, name, () => {
       // Streamed into compact columns, so that symbols with millions of records fit into memory.
       const view = this.service
-        .loadSymbolColumns(this.uri.fsPath, symbol)
+        .loadSymbolColumns(this.file, symbol)
         .then((data) => new TableView(columnTable(data.columns, data.keyCount, data.store, symbol)));
       view.catch(() => this.views.delete(name));
       return view;
@@ -422,7 +427,7 @@ class ViewerSession implements vscode.Disposable {
   /** The unique elements of the file in GDX order. */
   private loadUels(): Promise<string[]> {
     if (!this.uels) {
-      this.uels = this.service.loadUels(this.uri.fsPath);
+      this.uels = this.service.loadUels(this.file);
       this.uels.catch(() => (this.uels = undefined));
     }
     return this.uels;
@@ -437,7 +442,7 @@ class ViewerSession implements vscode.Disposable {
         this.ordered.add(view);
       } catch (err) {
         // Fall back to the order in which labels appear.
-        this.service.log(`Reading the unique elements of ${this.uri.fsPath} failed: ${errorMessage(err)}`);
+        this.service.log(`Reading the unique elements of ${this.file} failed: ${errorMessage(err)}`);
       }
     }
     return view;
@@ -451,7 +456,7 @@ class ViewerSession implements vscode.Disposable {
         return this.export(m.mode, m.names, m.options, m.states);
       case 'saveState':
         if (this.remembered()) {
-          await this.states.set(this.uri.fsPath, m.state);
+          await this.states.set(this.file, m.state);
         }
         return;
       case 'query': {
@@ -511,7 +516,7 @@ class ViewerSession implements vscode.Disposable {
       case 'preference':
         return savePreference(m, (err) => this.service.showError('Saving the setting failed', err));
       case 'image':
-        return saveChartImage(m, `${this.savePath(path.basename(this.uri.fsPath)).replace(/\.gdx$/i, '')}_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
+        return saveChartImage(m, this.saveDirectory(), `${this.stem()}_${m.name}`, (err) => this.service.showError('Saving the chart image failed', err));
       case 'copy':
         try {
           await copyToClipboard(await this.orderedView(m.name), m);
@@ -548,8 +553,8 @@ export class GdxViewerProvider implements vscode.CustomReadonlyEditorProvider<Gd
     private readonly extensionUri: vscode.Uri,
     private readonly service: GdxService,
     readonly states: ViewStateStore,
-    /** Where files of other file systems (e.g. git: in diff editors) are copied to, to be read by gdxdump. */
-    private readonly storage: vscode.Uri,
+    /** The directory of the extension's storage, where files of other file systems (e.g. git: in diff editors) are copied to. */
+    private readonly storage: string,
   ) {}
 
   openCustomDocument(uri: vscode.Uri): GdxDocument {
@@ -562,30 +567,31 @@ export class GdxViewerProvider implements vscode.CustomReadonlyEditorProvider<Gd
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')],
     };
     let uri = document.uri;
+    let file = fileKey(uri);
     let copy: string | undefined;
-    if (uri.scheme !== 'file') {
-      // gdxdump reads files from disk: view a copy (e.g. of a Git revision in a diff editor).
+    if (file === undefined) {
+      // A file the GDX functions cannot read directly: view a copy (e.g. of a Git revision in a diff editor).
       try {
-        copy = path.join(this.storage.fsPath, 'copies', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-        const file = path.join(copy, path.posix.basename(uri.path) || 'file.gdx');
-        await fs.promises.mkdir(copy, { recursive: true });
-        await fs.promises.writeFile(file, await vscode.workspace.fs.readFile(uri));
-        uri = vscode.Uri.file(file);
+        copy = path.join(this.storage, 'copies', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        file = path.join(copy, baseName(uri) || 'file.gdx');
+        await makeDirectory(copy);
+        await writeFile(file, await vscode.workspace.fs.readFile(uri));
+        uri = fileUri(file);
       } catch (err) {
         const text = `Reading ${document.uri.toString(true)} failed: ${errorMessage(err)}`.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
         panel.webview.html = `<body><p>${text}</p></body>`;
         return;
       }
     }
-    const session = new ViewerSession(this.service, uri, panel, this.states, copy ? document.uri : undefined);
+    const session = new ViewerSession(this.service, uri, file, panel, this.states, copy ? document.uri : undefined);
     const entry = { session, panel };
     this.sessions.add(entry);
     panel.onDidDispose(() => {
       session.dispose();
       this.sessions.delete(entry);
-      if (copy) fs.promises.rm(copy, { recursive: true, force: true }).catch(() => {});
+      if (copy) remove(copy).catch(() => {});
     });
-    panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'viewer.js', path.basename(uri.fsPath));
+    panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'viewer.js', path.basename(file));
   }
 
   /** The session of the active viewer tab, if any. */
